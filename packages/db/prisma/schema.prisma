@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// A person, identified once by their verified Discord ID.
+// Verification happens globally (one OAuth confirmation), independent
+// of which server(s) they end up being a member of.
+model User {
+  id              String       @id @default(cuid())
+  discordId       String       @unique
+  discordUsername String
+  verifiedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  memberships     Membership[]
+  bugReports      BugReport[]  @relation("ReportedBy")
+}
+
+// One Discord server using the system. Everything else is scoped
+// under a serverId so servers never see each other's data.
+model Server {
+  id              String       @id @default(cuid())
+  discordServerId String       @unique
+  name            String
+  ownerDiscordId  String
+  retestChannelId String?
+  createdAt       DateTime     @default(now())
+  roles           Role[]
+  memberships     Membership[]
+  bugReports      BugReport[]
+}
+
+// Custom rank defined per-server by the owner. Not hardcoded to
+// "Tester"/"Dev" — the owner names ranks and toggles permissions,
+// the system just enforces whatever they set.
+model Role {
+  id                String       @id @default(cuid())
+  serverId          String
+  server            Server       @relation(fields: [serverId], references: [id])
+  name              String
+  rank              Int          // hierarchy position; higher = more authority, used to stop a role promoting someone to its own level or above
+  canSubmitBugs     Boolean      @default(true)
+  canViewDashboard  Boolean      @default(false)
+  canManageBugs     Boolean      @default(false)
+  canPingTesters    Boolean      @default(false)
+  canArchive        Boolean      @default(false)
+  canManageRoles    Boolean      @default(false)
+  canManageSettings Boolean      @default(false)
+  memberships       Membership[]
+
+  @@unique([serverId, name])
+}
+
+// Links a User to a Server with a Role. A given person can be a
+// Tester in one server and a Dev in another — this join is what
+// makes that possible.
+model Membership {
+  id       String   @id @default(cuid())
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  serverId String
+  server   Server   @relation(fields: [serverId], references: [id])
+  roleId   String
+  role     Role     @relation(fields: [roleId], references: [id])
+  joinedAt DateTime @default(now())
+
+  @@unique([userId, serverId])
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Status {
+  NEW
+  NEEDS_INFO
+  FIXED
+  NOT_A_BUG
+  DUPLICATE
+  WONT_FIX
+}
+
+model BugReport {
+  id               String     @id @default(cuid())
+  serverId         String
+  server           Server     @relation(fields: [serverId], references: [id])
+  reporterId       String
+  reporter         User       @relation("ReportedBy", fields: [reporterId], references: [id])
+
+  title            String
+  description      String
+  stepsToReproduce String?
+  device           String?
+
+  evidenceFileUrl  String?
+  evidenceLink     String?
+  f9FileUrl        String?
+  f9Link           String?
+  additionalInfo   String?
+
+  priority         Priority   @default(MEDIUM)
+  status           Status     @default(NEW)
+
+  // set once "Ping testers" or "Post in retested" fires, so we know
+  // which message/thread to keep updating
+  retestMessageId  String?
+  retestThreadId   String?
+
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  archivedAt        DateTime?
+}

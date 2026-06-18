@@ -1,0 +1,14 @@
+{
+  "name": "@bugtracker/bot",
+  "version": "0.0.1",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node src/index.js",
+    "deploy": "node src/deploy-commands.js"
+  },
+  "dependencies": {
+    "@bugtracker/db": "*",
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.4.5"
+  }
+}

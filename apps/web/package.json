@@ -1,0 +1,13 @@
+{
+  "name": "@bugtracker/web",
+  "version": "0.0.1",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "@bugtracker/db": "*",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
