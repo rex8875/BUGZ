@@ -99,7 +99,7 @@ router.post('/api/servers/:serverId/reports/:reportId/archive', async (req, res)
 });
 
 router.get('/api/servers/:serverId/share-links', async (req, res) => {
-  if (!req.perms.canManageSettings) return res.status(403).json({ error: 'Not permitted to manage settings here.' });
+  if (!req.perms.canShareDashboard) return res.status(403).json({ error: 'Not permitted to share the dashboard here.' });
   res.json(await listShareLinks(req.server.id));
 });
 

@@ -44,7 +44,7 @@ async function load() {
     state.permissions = me.permissions;
     state.retestChannelId = me.retestChannelId;
     document.getElementById('server-name').textContent = 'Bug dashboard';
-    if (state.permissions.canManageSettings) {
+    if (state.permissions.canManageSettings || state.permissions.canShareDashboard) {
       document.getElementById('settings-btn').style.display = 'inline-block';
     }
     await loadReports();
@@ -221,54 +221,67 @@ document.getElementById('settings-btn').addEventListener('click', async () => {
 
 async function renderSettings() {
   const panel = document.getElementById('settings-panel');
-  const links = await api(`/api/servers/${serverId}/share-links`);
+  const canSettings = state.permissions.canManageSettings;
+  const canShare = state.permissions.canShareDashboard;
 
   panel.innerHTML = `
-    <h2>Settings</h2>
+    ${
+      canSettings
+        ? `<h2>Settings</h2>
     <div class="field-group">
       <div>
         <label>Retest channel ID</label>
         <input type="text" id="retest-channel-input" value="${escapeHtml(state.retestChannelId || '')}" placeholder="Discord channel ID" />
         <button id="save-channel-btn">Save</button>
       </div>
-    </div>
+    </div>`
+        : ''
+    }
 
-    <h2 style="margin-top:20px;">Share links</h2>
+    ${
+      canShare
+        ? `<h2 style="margin-top:20px;">Share links</h2>
     <div class="field-group">
       <select id="new-link-level"><option value="VIEW">View access</option><option value="DEV">Dev access</option></select>
       <input type="text" id="new-link-label" placeholder="Label (optional)" />
       <button id="create-link-btn" class="primary">Create link</button>
     </div>
-    <div id="link-list"></div>`;
+    <div id="link-list"></div>`
+        : ''
+    }`;
 
-  document.getElementById('save-channel-btn').addEventListener('click', async () => {
-    try {
-      await api(`/api/servers/${serverId}/settings`, {
-        method: 'PATCH',
-        body: JSON.stringify({ retestChannelId: document.getElementById('retest-channel-input').value }),
-      });
-      state.retestChannelId = document.getElementById('retest-channel-input').value;
-    } catch (err) {
-      showError(err.message);
-    }
-  });
+  if (canSettings) {
+    document.getElementById('save-channel-btn').addEventListener('click', async () => {
+      try {
+        await api(`/api/servers/${serverId}/settings`, {
+          method: 'PATCH',
+          body: JSON.stringify({ retestChannelId: document.getElementById('retest-channel-input').value }),
+        });
+        state.retestChannelId = document.getElementById('retest-channel-input').value;
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+  }
 
-  document.getElementById('create-link-btn').addEventListener('click', async () => {
-    try {
-      await api(`/api/servers/${serverId}/share-links`, {
-        method: 'POST',
-        body: JSON.stringify({
-          accessLevel: document.getElementById('new-link-level').value,
-          label: document.getElementById('new-link-label').value,
-        }),
-      });
-      await renderSettings();
-    } catch (err) {
-      showError(err.message);
-    }
-  });
+  if (canShare) {
+    document.getElementById('create-link-btn').addEventListener('click', async () => {
+      try {
+        await api(`/api/servers/${serverId}/share-links`, {
+          method: 'POST',
+          body: JSON.stringify({
+            accessLevel: document.getElementById('new-link-level').value,
+            label: document.getElementById('new-link-label').value,
+          }),
+        });
+        await renderSettings();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
 
-  renderLinkList(links);
+    renderLinkList(await api(`/api/servers/${serverId}/share-links`));
+  }
 }
 
 function renderLinkList(links) {

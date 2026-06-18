@@ -27,6 +27,7 @@ async function createServerOnJoin({ discordServerId, name, ownerDiscordId }) {
             canManageBugs: true,
             canPingTesters: true,
             canArchive: true,
+            canShareDashboard: true,
             canManageRoles: true,
             canManageSettings: true,
           },
@@ -133,13 +134,15 @@ function permissionsFromRole(role) {
     canManageBugs: role.canManageBugs,
     canPingTesters: role.canPingTesters,
     canArchive: role.canArchive,
+    canShareDashboard: role.canShareDashboard,
     canManageRoles: role.canManageRoles,
     canManageSettings: role.canManageSettings,
   };
 }
 
-// Guests never get role management or settings, even at Dev level — a
-// contractor's link shouldn't be able to mint more access.
+// Guests never get role management, settings, or the ability to share
+// the dashboard further, even at Dev level — a contractor's link
+// shouldn't be able to mint more access.
 function permissionsFromShareLink(shareLink) {
   const isDev = shareLink.accessLevel === 'DEV';
   return {
@@ -149,6 +152,7 @@ function permissionsFromShareLink(shareLink) {
     canManageBugs: isDev,
     canPingTesters: isDev,
     canArchive: isDev,
+    canShareDashboard: false,
     canManageRoles: false,
     canManageSettings: false,
   };
@@ -224,11 +228,12 @@ async function promoteMember({ serverId, actingDiscordId, targetDiscordId, newRo
 
 // ---- Dashboard share links -------------------------------------------
 
-// Only someone who can already manage settings (a member, not a guest —
-// see canManageSettings above) can create one of these.
+// Requires canShareDashboard specifically — not canManageSettings, since
+// being able to touch server settings and being able to hand out
+// dashboard access are different things an owner may want to separate.
 async function createShareLink({ serverId, actingDiscordId, accessLevel, label }) {
   const perms = await getEffectivePermissions(serverId, actingDiscordId);
-  if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
+  if (!perms?.canShareDashboard) throw new Error('Not permitted to share the dashboard in this server.');
 
   return prisma.shareLink.create({
     data: { serverId, accessLevel, label, createdByDiscordId: actingDiscordId },
@@ -237,7 +242,7 @@ async function createShareLink({ serverId, actingDiscordId, accessLevel, label }
 
 async function revokeShareLink({ serverId, actingDiscordId, shareLinkId }) {
   const perms = await getEffectivePermissions(serverId, actingDiscordId);
-  if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
+  if (!perms?.canShareDashboard) throw new Error('Not permitted to share the dashboard in this server.');
 
   const { count } = await prisma.shareLink.updateMany({
     where: { id: shareLinkId, serverId },

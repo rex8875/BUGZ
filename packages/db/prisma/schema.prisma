@@ -51,6 +51,7 @@ model Role {
   canManageBugs     Boolean      @default(false)
   canPingTesters    Boolean      @default(false)
   canArchive        Boolean      @default(false)
+  canShareDashboard Boolean      @default(false)
   canManageRoles    Boolean      @default(false)
   canManageSettings Boolean      @default(false)
   memberships       Membership[]
