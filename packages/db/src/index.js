@@ -42,6 +42,16 @@ async function getServerByDiscordId(discordServerId) {
   return prisma.server.findUnique({ where: { discordServerId } });
 }
 
+async function updateServerSettings({ serverId, actingDiscordId, retestChannelId }) {
+  const perms = await getEffectivePermissions(serverId, actingDiscordId);
+  if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
+  return prisma.server.update({ where: { id: serverId }, data: { retestChannelId } });
+}
+
+async function getServerById(serverId) {
+  return prisma.server.findUnique({ where: { id: serverId } });
+}
+
 async function getUserByDiscordId(discordId) {
   return prisma.user.findUnique({ where: { discordId } });
 }
@@ -115,6 +125,78 @@ async function getMembership(serverId, discordId) {
   });
 }
 
+function permissionsFromRole(role) {
+  return {
+    source: 'member',
+    canSubmitBugs: role.canSubmitBugs,
+    canViewDashboard: role.canViewDashboard,
+    canManageBugs: role.canManageBugs,
+    canPingTesters: role.canPingTesters,
+    canArchive: role.canArchive,
+    canManageRoles: role.canManageRoles,
+    canManageSettings: role.canManageSettings,
+  };
+}
+
+// Guests never get role management or settings, even at Dev level — a
+// contractor's link shouldn't be able to mint more access.
+function permissionsFromShareLink(shareLink) {
+  const isDev = shareLink.accessLevel === 'DEV';
+  return {
+    source: 'guest',
+    canSubmitBugs: false,
+    canViewDashboard: true,
+    canManageBugs: isDev,
+    canPingTesters: isDev,
+    canArchive: isDev,
+    canManageRoles: false,
+    canManageSettings: false,
+  };
+}
+
+// The one function the dashboard should call to check what someone can
+// do in a given server. Resolves real Memberships first; if there isn't
+// one, falls back to checking for an unrevoked share-link grant. Either
+// way the caller gets the same shape back, so it doesn't need to care
+// which path the access came from.
+async function getEffectivePermissions(serverId, discordId) {
+  const membership = await getMembership(serverId, discordId);
+  if (membership) return permissionsFromRole(membership.role);
+
+  const user = await prisma.user.findUnique({ where: { discordId } });
+  if (!user) return null;
+
+  const guestAccess = await prisma.guestAccess.findFirst({
+    where: { serverId, userId: user.id, shareLink: { revokedAt: null } },
+    include: { shareLink: true },
+  });
+  if (!guestAccess) return null;
+
+  return permissionsFromShareLink(guestAccess.shareLink);
+}
+
+// For the "which server's dashboard am I in" picker page after login —
+// every server this person can reach, whether as a member or a guest.
+async function listAccessibleServers(discordId) {
+  const user = await prisma.user.findUnique({ where: { discordId } });
+  if (!user) return [];
+
+  const memberships = await prisma.membership.findMany({
+    where: { userId: user.id },
+    include: { server: true, role: true },
+  });
+
+  const guestAccesses = await prisma.guestAccess.findMany({
+    where: { userId: user.id, shareLink: { revokedAt: null } },
+    include: { server: true, shareLink: true },
+  });
+
+  return [
+    ...memberships.map((m) => ({ server: m.server, permissions: permissionsFromRole(m.role) })),
+    ...guestAccesses.map((g) => ({ server: g.server, permissions: permissionsFromShareLink(g.shareLink) })),
+  ];
+}
+
 // actingDiscordId must have canManageRoles, and can only promote to a
 // rank strictly below their own — stops a Dev handing out Owner, and
 // stops anyone promoting a peer to their own level.
@@ -137,6 +219,57 @@ async function promoteMember({ serverId, actingDiscordId, targetDiscordId, newRo
     where: { userId_serverId: { userId: targetUser.id, serverId } },
     update: { roleId: newRole.id },
     create: { userId: targetUser.id, serverId, roleId: newRole.id },
+  });
+}
+
+// ---- Dashboard share links -------------------------------------------
+
+// Only someone who can already manage settings (a member, not a guest —
+// see canManageSettings above) can create one of these.
+async function createShareLink({ serverId, actingDiscordId, accessLevel, label }) {
+  const perms = await getEffectivePermissions(serverId, actingDiscordId);
+  if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
+
+  return prisma.shareLink.create({
+    data: { serverId, accessLevel, label, createdByDiscordId: actingDiscordId },
+  });
+}
+
+async function revokeShareLink({ serverId, actingDiscordId, shareLinkId }) {
+  const perms = await getEffectivePermissions(serverId, actingDiscordId);
+  if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
+
+  const { count } = await prisma.shareLink.updateMany({
+    where: { id: shareLinkId, serverId },
+    data: { revokedAt: new Date() },
+  });
+  if (count === 0) throw new Error('Link not found in this server.');
+}
+
+// For the owner/settings page: every link for this server, plus who has
+// actually redeemed each one.
+async function listShareLinks(serverId) {
+  return prisma.shareLink.findMany({
+    where: { serverId },
+    include: { guestAccess: { include: { user: true } } },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+// Called the first time someone with a share link reaches the
+// dashboard. They must already be verified — the link grants a
+// permission level, not an identity.
+async function redeemShareLink({ shareLinkId, discordId }) {
+  const link = await prisma.shareLink.findUnique({ where: { id: shareLinkId } });
+  if (!link || link.revokedAt) throw new Error('This link is invalid or has been revoked.');
+
+  const user = await prisma.user.findUnique({ where: { discordId } });
+  if (!user) throw new Error('You need to verify your Discord identity first.');
+
+  return prisma.guestAccess.upsert({
+    where: { shareLinkId_userId: { shareLinkId: link.id, userId: user.id } },
+    update: {},
+    create: { shareLinkId: link.id, serverId: link.serverId, userId: user.id },
   });
 }
 
@@ -164,6 +297,13 @@ async function listBugReports(serverId, { priority, status, includeArchived = fa
   });
 }
 
+async function getBugReport(serverId, bugReportId) {
+  return prisma.bugReport.findFirst({
+    where: { id: bugReportId, serverId },
+    include: { reporter: true },
+  });
+}
+
 // Every mutation re-checks serverId on the where clause, not just the id —
 // so even a guessed/leaked report id can't be edited from the wrong server.
 async function updateBugReport(serverId, bugReportId, data) {
@@ -179,13 +319,22 @@ module.exports = {
   prisma,
   createServerOnJoin,
   getServerByDiscordId,
+  getServerById,
+  updateServerSettings,
   getUserByDiscordId,
   verifyUser,
   assignOwnerRole,
   transferOwnership,
   getMembership,
+  getEffectivePermissions,
+  listAccessibleServers,
   promoteMember,
+  createShareLink,
+  revokeShareLink,
+  listShareLinks,
+  redeemShareLink,
   createBugReport,
+  getBugReport,
   listBugReports,
   updateBugReport,
 };

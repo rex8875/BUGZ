@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Bug dashboard</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1 id="server-name">Loading…</h1>
+      <div>
+        <button id="settings-btn" style="display:none;">Settings</button>
+        <a href="/dashboard"><button>All servers</button></a>
+      </div>
+    </div>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div id="settings-panel" class="detail-panel" style="display:none;"></div>
+
+    <div class="filters" id="filters"></div>
+    <div class="report-list" id="report-list">Loading…</div>
+    <div id="detail-area"></div>
+  </div>
+  <script src="/board.js"></script>
+</body>
+</html>

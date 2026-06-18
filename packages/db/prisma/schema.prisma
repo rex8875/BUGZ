@@ -18,6 +18,7 @@ model User {
   createdAt       DateTime     @default(now())
   memberships     Membership[]
   bugReports      BugReport[]  @relation("ReportedBy")
+  guestAccess     GuestAccess[]
 }
 
 // One Discord server using the system. Everything else is scoped
@@ -32,6 +33,8 @@ model Server {
   roles           Role[]
   memberships     Membership[]
   bugReports      BugReport[]
+  shareLinks      ShareLink[]
+  guestAccess     GuestAccess[]
 }
 
 // Custom rank defined per-server by the owner. Not hardcoded to
@@ -85,6 +88,44 @@ enum Status {
   NOT_A_BUG
   DUPLICATE
   WONT_FIX
+}
+
+enum GuestAccessLevel {
+  VIEW
+  DEV
+}
+
+// A shareable dashboard link, scoped to one server. Lets someone who
+// isn't a member of the Discord server (a contractor, an HR reviewer)
+// still get into that server's dashboard at View or Dev level, without
+// going through the normal Role/Membership promotion path.
+model ShareLink {
+  id                 String           @id @default(cuid())
+  serverId           String
+  server             Server           @relation(fields: [serverId], references: [id])
+  accessLevel        GuestAccessLevel
+  label              String?
+  createdByDiscordId String
+  createdAt          DateTime         @default(now())
+  revokedAt          DateTime?
+  guestAccess        GuestAccess[]
+}
+
+// Created the first time someone actually redeems a ShareLink. Ties
+// the grant to a real verified identity so dashboard actions taken by
+// a guest are still attributable, and so the owner can see exactly who
+// has used each link.
+model GuestAccess {
+  id          String    @id @default(cuid())
+  shareLinkId String
+  shareLink   ShareLink @relation(fields: [shareLinkId], references: [id])
+  serverId    String
+  server      Server    @relation(fields: [serverId], references: [id])
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  grantedAt   DateTime  @default(now())
+
+  @@unique([shareLinkId, userId])
 }
 
 model BugReport {
