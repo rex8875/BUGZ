@@ -131,3 +131,35 @@ select, input[type="text"], textarea {
   margin-bottom: 8px;
 }
 .server-card:hover { border-color: var(--accent); }
+
+section h2 { font-size: 14px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px; }
+
+.role-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+}
+.role-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.role-card-header strong { font-size: 14px; }
+
+.perm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px 14px;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.perm-grid label { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; margin: 0; }
+
+.member-row, .banned-row, .audit-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.member-row:last-child, .banned-row:last-child, .audit-row:last-child { border-bottom: none; }

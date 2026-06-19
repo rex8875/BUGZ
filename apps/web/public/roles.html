@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Roles & members</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <h1>Roles & members</h1>
+      <a id="back-link" href=""><button>Back to dashboard</button></a>
+    </div>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <section>
+      <h2>Roles</h2>
+      <div id="role-list"></div>
+      <div class="detail-panel" style="margin-top:10px;">
+        <div class="field-group">
+          <div><label>Name</label><input type="text" id="new-role-name" placeholder="e.g. Dev" /></div>
+          <div><label>Rank</label><input type="text" id="new-role-rank" placeholder="e.g. 50" /></div>
+        </div>
+        <div id="new-role-perms" class="perm-grid"></div>
+        <button id="create-role-btn" class="primary" style="margin-top:10px;">Create role</button>
+      </div>
+    </section>
+
+    <section style="margin-top:28px;">
+      <h2>Members</h2>
+      <div id="member-list"></div>
+    </section>
+
+    <section style="margin-top:28px;">
+      <h2>Banned</h2>
+      <div id="banned-list"></div>
+    </section>
+
+    <section style="margin-top:28px;">
+      <h2>Audit log</h2>
+      <div id="audit-list"></div>
+    </section>
+  </div>
+  <script src="/roles.js"></script>
+</body>
+</html>

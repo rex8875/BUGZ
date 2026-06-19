@@ -47,10 +47,26 @@ async function load() {
     if (state.permissions.canManageSettings || state.permissions.canShareDashboard) {
       document.getElementById('settings-btn').style.display = 'inline-block';
     }
+    if (state.permissions.canManageRoles) {
+      const rolesLink = document.getElementById('roles-link');
+      rolesLink.href = `/dashboard/${serverId}/roles`;
+      rolesLink.style.display = 'inline-block';
+    }
+    await loadSummary();
     await loadReports();
   } catch (err) {
     showError(err.message);
   }
+}
+
+async function loadSummary() {
+  const summary = await api(`/api/servers/${serverId}/summary`);
+  const labels = { NEW: 'New', NEEDS_INFO: 'Needs info', FIXED: 'Fixed', NOT_A_BUG: 'Not a bug', DUPLICATE: 'Duplicate', WONT_FIX: "Won't fix" };
+  const parts = [`${summary.total} active`];
+  for (const key of Object.keys(labels)) {
+    if (summary[key]) parts.push(`${summary[key]} ${labels[key].toLowerCase()}`);
+  }
+  document.getElementById('summary-strip').textContent = parts.join(' · ');
 }
 
 async function loadReports() {
@@ -165,10 +181,10 @@ function renderDetail() {
 
   area.innerHTML = `
     <div class="detail-panel">
-      <h2>${escapeHtml(report.title)}</h2>
+      <h2>${escapeHtml(report.title)} ${state.permissions.canEditReports ? '<button data-edit-title>Edit title</button>' : ''}</h2>
       <div class="detail-meta">reported by ${escapeHtml(report.reporter?.discordUsername || 'unknown')} · ${escapeHtml(report.device || 'unspecified device')} · ${new Date(report.createdAt).toLocaleDateString()}</div>
 
-      <div class="detail-row"><div class="label">Description</div><div>${escapeHtml(report.description)}</div></div>
+      <div class="detail-row"><div class="label">Description</div><div>${escapeHtml(report.description)} ${state.permissions.canEditReports ? '<button data-edit-description>Edit</button>' : ''}</div></div>
       ${report.stepsToReproduce ? `<div class="detail-row"><div class="label">Steps</div><div>${escapeHtml(report.stepsToReproduce)}</div></div>` : ''}
       <div class="detail-row"><div class="label">Evidence</div><div>${evidenceLinkHtml(report.evidenceFileUrl, report.evidenceLink)}</div></div>
       <div class="detail-row"><div class="label">F9</div><div>${evidenceLinkHtml(report.f9FileUrl, report.f9Link)}</div></div>
@@ -177,12 +193,46 @@ function renderDetail() {
       ${quickActionsHtml(report)}
       ${state.permissions.canPingTesters ? `<div class="posts-to">Posts to channel ${state.retestChannelId ? escapeHtml(state.retestChannelId) : '(not set — see Settings)'}</div>` : ''}
       ${state.permissions.canArchive ? `<div class="hint">Archive enables once status is Fixed, Not a bug, Duplicate, or Won't fix</div>` : ''}
+      ${state.permissions.canDeleteReports ? `<div style="margin-top:12px;"><button data-delete-report>Delete permanently</button></div>` : ''}
     </div>`;
 
   const panel = area.querySelector('.detail-panel');
   panel.querySelectorAll('.priority-select').forEach((sel) => sel.addEventListener('change', () => updateReport(report.id, { priority: sel.value })));
   panel.querySelectorAll('.status-select').forEach((sel) => sel.addEventListener('change', () => updateReport(report.id, { status: sel.value })));
   panel.querySelectorAll('[data-action]').forEach((btn) => btn.addEventListener('click', () => runAction(report.id, btn.dataset.action)));
+
+  const editTitleBtn = panel.querySelector('[data-edit-title]');
+  if (editTitleBtn) {
+    editTitleBtn.addEventListener('click', () => {
+      const next = prompt('New title', report.title);
+      if (next && next.trim()) updateReport(report.id, { title: next.trim() });
+    });
+  }
+
+  const editDescBtn = panel.querySelector('[data-edit-description]');
+  if (editDescBtn) {
+    editDescBtn.addEventListener('click', () => {
+      const next = prompt('New description', report.description);
+      if (next && next.trim()) updateReport(report.id, { description: next.trim() });
+    });
+  }
+
+  const deleteBtn = panel.querySelector('[data-delete-report]');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm('Permanently delete this report? This cannot be undone.')) return;
+      try {
+        await api(`/api/servers/${serverId}/reports/${report.id}`, { method: 'DELETE' });
+        state.reports = state.reports.filter((r) => r.id !== report.id);
+        state.expandedId = null;
+        renderList();
+        renderDetail();
+        loadSummary();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+  }
 }
 
 async function updateReport(id, data) {
@@ -191,6 +241,7 @@ async function updateReport(id, data) {
     state.reports = state.reports.map((r) => (r.id === id ? updated : r));
     renderList();
     renderDetail();
+    if (data.status) loadSummary();
   } catch (err) {
     showError(err.message);
   }
@@ -202,6 +253,7 @@ async function runAction(id, action) {
     state.reports = state.reports.map((r) => (r.id === id ? updated : r));
     renderList();
     renderDetail();
+    if (action === 'archive') loadSummary();
   } catch (err) {
     showError(err.message);
   }

@@ -13,4 +13,8 @@ router.get('/dashboard/:serverId', (req, res) => {
   res.sendFile(path.join(__dirname, '../../public/board.html'));
 });
 
+router.get('/dashboard/:serverId/roles', (req, res) => {
+  res.sendFile(path.join(__dirname, '../../public/roles.html'));
+});
+
 module.exports = router;

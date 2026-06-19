@@ -35,6 +35,8 @@ model Server {
   bugReports      BugReport[]
   shareLinks      ShareLink[]
   guestAccess     GuestAccess[]
+  bannedMembers   BannedMember[]
+  auditLog        AuditLogEntry[]
 }
 
 // Custom rank defined per-server by the owner. Not hardcoded to
@@ -51,7 +53,11 @@ model Role {
   canManageBugs     Boolean      @default(false)
   canPingTesters    Boolean      @default(false)
   canArchive        Boolean      @default(false)
+  canEditReports    Boolean      @default(false)
+  canDeleteReports  Boolean      @default(false)
   canShareDashboard Boolean      @default(false)
+  canKickMembers    Boolean      @default(false)
+  canBanMembers     Boolean      @default(false)
   canManageRoles    Boolean      @default(false)
   canManageSettings Boolean      @default(false)
   memberships       Membership[]
@@ -127,6 +133,37 @@ model GuestAccess {
   grantedAt   DateTime  @default(now())
 
   @@unique([shareLinkId, userId])
+}
+
+// A discordId blocked from holding membership in this server again
+// until explicitly unbanned. Banning removes any existing Membership
+// and adds this row; promoting/inviting a banned person back is
+// refused until the ban is lifted.
+model BannedMember {
+  id                 String   @id @default(cuid())
+  serverId           String
+  server             Server   @relation(fields: [serverId], references: [id])
+  discordId          String
+  bannedByDiscordId  String
+  reason             String?
+  bannedAt           DateTime @default(now())
+
+  @@unique([serverId, discordId])
+}
+
+// A record of who did what, for the governance-sensitive actions —
+// ownership transfer, role changes, kicks/bans, share-link issuance.
+// Deliberately doesn't log routine bug-status edits; those would be
+// high-frequency noise without much accountability value, and already
+// carry their own updatedAt.
+model AuditLogEntry {
+  id              String   @id @default(cuid())
+  serverId        String
+  server          Server   @relation(fields: [serverId], references: [id])
+  actorDiscordId  String
+  action          String
+  details         String?
+  createdAt       DateTime @default(now())
 }
 
 model BugReport {

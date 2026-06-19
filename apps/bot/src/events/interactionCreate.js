@@ -1,5 +1,5 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { getUserByDiscordId, getServerByDiscordId, createBugReport } = require('@bugtracker/db');
+const { getUserByDiscordId, getServerByDiscordId, getMembership, createBugReport } = require('@bugtracker/db');
 const { buildCoreModal, buildEvidenceModal } = require('../lib/bugReportModals');
 const { saveDraft, getDraft, clearDraft } = require('../lib/bugReportDrafts');
 
@@ -39,6 +39,16 @@ module.exports = {
             ephemeral: true,
           });
         }
+
+        const server = await getServerByDiscordId(interaction.guildId);
+        const membership = server ? await getMembership(server.id, interaction.user.id) : null;
+        if (!membership?.role.canSubmitBugs) {
+          return interaction.reply({
+            content: "You don't have permission to report bugs in this server.",
+            ephemeral: true,
+          });
+        }
+
         return interaction.showModal(buildCoreModal());
       }
 
@@ -94,14 +104,18 @@ module.exports = {
 
         const server = await getServerByDiscordId(interaction.guildId);
 
-        await createBugReport(server.id, interaction.user.id, {
-          ...draft,
-          evidenceFileUrl: evidenceFiles?.[0]?.url ?? null,
-          evidenceLink: evidenceLink || null,
-          f9FileUrl: f9Files?.[0]?.url ?? null,
-          f9Link: f9Link || null,
-          additionalInfo,
-        });
+        try {
+          await createBugReport(server.id, interaction.user.id, {
+            ...draft,
+            evidenceFileUrl: evidenceFiles?.[0]?.url ?? null,
+            evidenceLink: evidenceLink || null,
+            f9FileUrl: f9Files?.[0]?.url ?? null,
+            f9Link: f9Link || null,
+            additionalInfo,
+          });
+        } catch (err) {
+          return interaction.reply({ content: err.message, ephemeral: true });
+        }
 
         clearDraft(interaction.user.id);
 

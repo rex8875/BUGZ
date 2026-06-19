@@ -2,6 +2,28 @@ const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
+// Records a governance-sensitive action. Deliberately not used for
+// routine bug-report edits (status/priority changes) — see the
+// AuditLogEntry model comment for why.
+async function logAction(serverId, actorDiscordId, action, details) {
+  await prisma.auditLogEntry.create({
+    data: { serverId, actorDiscordId, action, details: details ? JSON.stringify(details) : null },
+  });
+}
+
+async function listAuditLog(serverId, limit = 100) {
+  return prisma.auditLogEntry.findMany({
+    where: { serverId },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+}
+
+async function isBanned(serverId, discordId) {
+  const ban = await prisma.bannedMember.findUnique({ where: { serverId_discordId: { serverId, discordId } } });
+  return Boolean(ban);
+}
+
 // ---- Servers -------------------------------------------------------
 
 // Called from the bot's guildCreate handler. Creates the server row
@@ -27,7 +49,11 @@ async function createServerOnJoin({ discordServerId, name, ownerDiscordId }) {
             canManageBugs: true,
             canPingTesters: true,
             canArchive: true,
+            canEditReports: true,
+            canDeleteReports: true,
             canShareDashboard: true,
+            canKickMembers: true,
+            canBanMembers: true,
             canManageRoles: true,
             canManageSettings: true,
           },
@@ -113,6 +139,7 @@ async function transferOwnership({ serverId, actingDiscordId, newOwnerDiscordId 
 
   await prisma.server.update({ where: { id: serverId }, data: { ownerDiscordId: newOwnerDiscordId } });
   await assignOwnerRole(serverId, newOwner.id);
+  await logAction(serverId, actingDiscordId, 'OWNERSHIP_TRANSFERRED', { to: newOwnerDiscordId });
 
   return prisma.server.findUnique({ where: { id: serverId } });
 }
@@ -134,15 +161,19 @@ function permissionsFromRole(role) {
     canManageBugs: role.canManageBugs,
     canPingTesters: role.canPingTesters,
     canArchive: role.canArchive,
+    canEditReports: role.canEditReports,
+    canDeleteReports: role.canDeleteReports,
     canShareDashboard: role.canShareDashboard,
+    canKickMembers: role.canKickMembers,
+    canBanMembers: role.canBanMembers,
     canManageRoles: role.canManageRoles,
     canManageSettings: role.canManageSettings,
   };
 }
 
-// Guests never get role management, settings, or the ability to share
-// the dashboard further, even at Dev level — a contractor's link
-// shouldn't be able to mint more access.
+// Dev-access guests get the bug-content powers (edit/delete sit
+// alongside manage/archive), but never the member-governance ones —
+// a contractor's link shouldn't be able to kick, ban, or mint more access.
 function permissionsFromShareLink(shareLink) {
   const isDev = shareLink.accessLevel === 'DEV';
   return {
@@ -152,7 +183,11 @@ function permissionsFromShareLink(shareLink) {
     canManageBugs: isDev,
     canPingTesters: isDev,
     canArchive: isDev,
+    canEditReports: isDev,
+    canDeleteReports: isDev,
     canShareDashboard: false,
+    canKickMembers: false,
+    canBanMembers: false,
     canManageRoles: false,
     canManageSettings: false,
   };
@@ -210,6 +245,10 @@ async function promoteMember({ serverId, actingDiscordId, targetDiscordId, newRo
     throw new Error('Not permitted to manage roles in this server.');
   }
 
+  if (await isBanned(serverId, targetDiscordId)) {
+    throw new Error('That person is banned from this server — unban them first.');
+  }
+
   const newRole = await prisma.role.findFirst({ where: { id: newRoleId, serverId } });
   if (!newRole) throw new Error('That role does not belong to this server.');
   if (newRole.rank >= acting.role.rank) {
@@ -219,11 +258,129 @@ async function promoteMember({ serverId, actingDiscordId, targetDiscordId, newRo
   const targetUser = await prisma.user.findUnique({ where: { discordId: targetDiscordId } });
   if (!targetUser) throw new Error('That person has not verified yet.');
 
-  return prisma.membership.upsert({
+  const membership = await prisma.membership.upsert({
     where: { userId_serverId: { userId: targetUser.id, serverId } },
     update: { roleId: newRole.id },
     create: { userId: targetUser.id, serverId, roleId: newRole.id },
   });
+
+  await logAction(serverId, actingDiscordId, 'MEMBER_PROMOTED', { target: targetDiscordId, role: newRole.name });
+  return membership;
+}
+
+// Every member currently in this server, for the roles/members page.
+async function listMembers(serverId) {
+  return prisma.membership.findMany({
+    where: { serverId },
+    include: { user: true, role: true },
+    orderBy: { role: { rank: 'desc' } },
+  });
+}
+
+async function listBannedMembers(serverId) {
+  return prisma.bannedMember.findMany({ where: { serverId }, orderBy: { bannedAt: 'desc' } });
+}
+
+// Removes someone's membership without a permanent ban — they could be
+// re-promoted later without anyone needing to unban them first.
+async function kickMember({ serverId, actingDiscordId, targetDiscordId }) {
+  const acting = await getMembership(serverId, actingDiscordId);
+  if (!acting?.role.canKickMembers) throw new Error('Not permitted to kick members in this server.');
+
+  const server = await prisma.server.findUnique({ where: { id: serverId } });
+  if (server.ownerDiscordId === targetDiscordId) {
+    throw new Error('Cannot kick the server owner — transfer ownership first.');
+  }
+
+  const target = await getMembership(serverId, targetDiscordId);
+  if (target && target.role.rank >= acting.role.rank) {
+    throw new Error('Cannot kick someone at or above your own rank.');
+  }
+
+  await prisma.membership.deleteMany({ where: { serverId, user: { discordId: targetDiscordId } } });
+  await logAction(serverId, actingDiscordId, 'MEMBER_KICKED', { target: targetDiscordId });
+}
+
+// Removes membership (if any) and blocks the person from being added
+// back until unbanned.
+async function banMember({ serverId, actingDiscordId, targetDiscordId, reason }) {
+  const acting = await getMembership(serverId, actingDiscordId);
+  if (!acting?.role.canBanMembers) throw new Error('Not permitted to ban members in this server.');
+
+  const server = await prisma.server.findUnique({ where: { id: serverId } });
+  if (server.ownerDiscordId === targetDiscordId) {
+    throw new Error('Cannot ban the server owner — transfer ownership first.');
+  }
+
+  const target = await getMembership(serverId, targetDiscordId);
+  if (target && target.role.rank >= acting.role.rank) {
+    throw new Error('Cannot ban someone at or above your own rank.');
+  }
+
+  await prisma.membership.deleteMany({ where: { serverId, user: { discordId: targetDiscordId } } });
+  await prisma.bannedMember.upsert({
+    where: { serverId_discordId: { serverId, discordId: targetDiscordId } },
+    update: { reason, bannedByDiscordId: actingDiscordId, bannedAt: new Date() },
+    create: { serverId, discordId: targetDiscordId, bannedByDiscordId: actingDiscordId, reason },
+  });
+  await logAction(serverId, actingDiscordId, 'MEMBER_BANNED', { target: targetDiscordId, reason });
+}
+
+async function unbanMember({ serverId, actingDiscordId, targetDiscordId }) {
+  const acting = await getMembership(serverId, actingDiscordId);
+  if (!acting?.role.canBanMembers) throw new Error('Not permitted to unban members in this server.');
+
+  await prisma.bannedMember.deleteMany({ where: { serverId, discordId: targetDiscordId } });
+  await logAction(serverId, actingDiscordId, 'MEMBER_UNBANNED', { target: targetDiscordId });
+}
+
+// ---- Roles -------------------------------------------------------------
+
+async function listRoles(serverId) {
+  return prisma.role.findMany({ where: { serverId }, orderBy: { rank: 'desc' } });
+}
+
+// Can only create a role at a rank strictly below your own — same
+// ceiling logic as promoting, applied to minting the role itself.
+async function createRole({ serverId, actingDiscordId, name, rank, permissions = {} }) {
+  const acting = await getMembership(serverId, actingDiscordId);
+  if (!acting?.role.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
+  if (rank >= acting.role.rank) throw new Error('Cannot create a role at or above your own rank.');
+
+  const role = await prisma.role.create({ data: { serverId, name, rank, ...permissions } });
+  await logAction(serverId, actingDiscordId, 'ROLE_CREATED', { role: name, rank });
+  return role;
+}
+
+async function updateRolePermissions({ serverId, actingDiscordId, roleId, permissions }) {
+  const acting = await getMembership(serverId, actingDiscordId);
+  if (!acting?.role.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
+
+  const target = await prisma.role.findFirst({ where: { id: roleId, serverId } });
+  if (!target) throw new Error('That role does not belong to this server.');
+  if (target.rank >= acting.role.rank) throw new Error('Cannot edit a role at or above your own rank.');
+  if (permissions.rank !== undefined && permissions.rank >= acting.role.rank) {
+    throw new Error('Cannot raise a role to your own rank or above.');
+  }
+
+  const updated = await prisma.role.update({ where: { id: roleId }, data: permissions });
+  await logAction(serverId, actingDiscordId, 'ROLE_UPDATED', { role: target.name });
+  return updated;
+}
+
+async function deleteRole({ serverId, actingDiscordId, roleId }) {
+  const acting = await getMembership(serverId, actingDiscordId);
+  if (!acting?.role.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
+
+  const target = await prisma.role.findFirst({ where: { id: roleId, serverId } });
+  if (!target) throw new Error('That role does not belong to this server.');
+  if (target.rank >= acting.role.rank) throw new Error('Cannot delete a role at or above your own rank.');
+
+  const inUse = await prisma.membership.count({ where: { roleId } });
+  if (inUse > 0) throw new Error(`${inUse} member(s) still hold this role — reassign them first.`);
+
+  await prisma.role.delete({ where: { id: roleId } });
+  await logAction(serverId, actingDiscordId, 'ROLE_DELETED', { role: target.name });
 }
 
 // ---- Dashboard share links -------------------------------------------
@@ -235,9 +392,11 @@ async function createShareLink({ serverId, actingDiscordId, accessLevel, label }
   const perms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!perms?.canShareDashboard) throw new Error('Not permitted to share the dashboard in this server.');
 
-  return prisma.shareLink.create({
+  const link = await prisma.shareLink.create({
     data: { serverId, accessLevel, label, createdByDiscordId: actingDiscordId },
   });
+  await logAction(serverId, actingDiscordId, 'SHARE_LINK_CREATED', { accessLevel, label });
+  return link;
 }
 
 async function revokeShareLink({ serverId, actingDiscordId, shareLinkId }) {
@@ -249,6 +408,7 @@ async function revokeShareLink({ serverId, actingDiscordId, shareLinkId }) {
     data: { revokedAt: new Date() },
   });
   if (count === 0) throw new Error('Link not found in this server.');
+  await logAction(serverId, actingDiscordId, 'SHARE_LINK_REVOKED', { shareLinkId });
 }
 
 // For the owner/settings page: every link for this server, plus who has
@@ -281,11 +441,28 @@ async function redeemShareLink({ shareLinkId, discordId }) {
 // ---- Bug reports -------------------------------------------------------
 
 async function createBugReport(serverId, reporterDiscordId, data) {
-  const reporter = await prisma.user.findUnique({ where: { discordId: reporterDiscordId } });
-  if (!reporter) throw new Error('Reporter has not verified yet.');
+  if (await isBanned(serverId, reporterDiscordId)) {
+    throw new Error('You are banned from this server.');
+  }
+
+  const membership = await getMembership(serverId, reporterDiscordId);
+  if (!membership?.role.canSubmitBugs) {
+    throw new Error('You do not have permission to report bugs in this server.');
+  }
 
   return prisma.bugReport.create({
-    data: { serverId, reporterId: reporter.id, ...data },
+    data: { serverId, reporterId: membership.userId, ...data },
+  });
+}
+
+// For a tester checking their own submissions without dashboard access —
+// e.g. a /my-bugs command in Discord.
+async function listMyBugReports(serverId, reporterDiscordId) {
+  const user = await prisma.user.findUnique({ where: { discordId: reporterDiscordId } });
+  if (!user) return [];
+  return prisma.bugReport.findMany({
+    where: { serverId, reporterId: user.id },
+    orderBy: { createdAt: 'desc' },
   });
 }
 
@@ -320,6 +497,41 @@ async function updateBugReport(serverId, bugReportId, data) {
   return prisma.bugReport.findUnique({ where: { id: bugReportId } });
 }
 
+// Permanent — for obvious spam/troll reports that shouldn't even sit in
+// the 15-day archive window. Distinct from archiving, which is meant to
+// be a soft, temporary state.
+async function deleteBugReport(serverId, bugReportId) {
+  const { count } = await prisma.bugReport.deleteMany({ where: { id: bugReportId, serverId } });
+  if (count === 0) throw new Error('Bug report not found in this server.');
+}
+
+// Quick counts for a dashboard summary strip — one query instead of
+// pulling every report just to count them client-side.
+async function getReportSummary(serverId) {
+  const grouped = await prisma.bugReport.groupBy({
+    by: ['status'],
+    where: { serverId, archivedAt: null },
+    _count: true,
+  });
+  const summary = { total: 0 };
+  for (const g of grouped) {
+    summary[g.status] = g._count;
+    summary.total += g._count;
+  }
+  return summary;
+}
+
+// Permanently removes archived reports past the 15-day retention
+// window. Meant to be called on an interval (e.g. once an hour) by
+// whichever process stays running — see apps/bot/src/index.js.
+async function deleteExpiredArchivedReports() {
+  const cutoff = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+  const { count } = await prisma.bugReport.deleteMany({
+    where: { archivedAt: { not: null, lt: cutoff } },
+  });
+  return count;
+}
+
 module.exports = {
   prisma,
   createServerOnJoin,
@@ -334,12 +546,27 @@ module.exports = {
   getEffectivePermissions,
   listAccessibleServers,
   promoteMember,
+  listMembers,
+  listBannedMembers,
+  kickMember,
+  banMember,
+  unbanMember,
+  isBanned,
+  listRoles,
+  createRole,
+  updateRolePermissions,
+  deleteRole,
+  listAuditLog,
   createShareLink,
   revokeShareLink,
   listShareLinks,
   redeemShareLink,
   createBugReport,
+  listMyBugReports,
   getBugReport,
   listBugReports,
   updateBugReport,
+  deleteBugReport,
+  getReportSummary,
+  deleteExpiredArchivedReports,
 };

@@ -5,11 +5,24 @@ const {
   listBugReports,
   getBugReport,
   updateBugReport,
+  deleteBugReport,
+  getReportSummary,
   updateServerSettings,
   createShareLink,
   revokeShareLink,
   listShareLinks,
   listAccessibleServers,
+  listRoles,
+  createRole,
+  updateRolePermissions,
+  deleteRole,
+  listMembers,
+  listBannedMembers,
+  promoteMember,
+  kickMember,
+  banMember,
+  unbanMember,
+  listAuditLog,
 } = require('@bugtracker/db');
 const { postRetestMessage } = require('../lib/discordRest');
 const requireAuthApi = require('../middleware/requireAuthApi');
@@ -50,15 +63,43 @@ router.get('/api/servers/:serverId/reports', async (req, res) => {
   res.json(reports);
 });
 
-router.patch('/api/servers/:serverId/reports/:reportId', async (req, res) => {
-  if (!req.perms.canManageBugs) return res.status(403).json({ error: 'Not permitted to manage bug reports here.' });
+router.get('/api/servers/:serverId/summary', async (req, res) => {
+  res.json(await getReportSummary(req.server.id));
+});
 
+router.patch('/api/servers/:serverId/reports/:reportId', async (req, res) => {
   const allowed = {};
-  if (req.body.priority) allowed.priority = req.body.priority;
-  if (req.body.status) allowed.status = req.body.status;
+
+  // Status/priority changes are triage — canManageBugs.
+  if (req.perms.canManageBugs) {
+    if (req.body.priority) allowed.priority = req.body.priority;
+    if (req.body.status) allowed.status = req.body.status;
+  }
+
+  // Editing the actual content is a separate, narrower permission —
+  // correcting a typo isn't the same power as triaging.
+  if (req.perms.canEditReports) {
+    for (const field of ['title', 'description', 'stepsToReproduce', 'device', 'additionalInfo']) {
+      if (req.body[field] !== undefined) allowed[field] = req.body[field];
+    }
+  }
+
+  if (Object.keys(allowed).length === 0) {
+    return res.status(403).json({ error: 'Not permitted to make this change here.' });
+  }
 
   try {
     res.json(await updateBugReport(req.server.id, req.params.reportId, allowed));
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+router.delete('/api/servers/:serverId/reports/:reportId', async (req, res) => {
+  if (!req.perms.canDeleteReports) return res.status(403).json({ error: 'Not permitted to delete reports here.' });
+  try {
+    await deleteBugReport(req.server.id, req.params.reportId);
+    res.json({ ok: true });
   } catch (err) {
     res.status(404).json({ error: err.message });
   }
@@ -142,6 +183,112 @@ router.patch('/api/servers/:serverId/settings', async (req, res) => {
   } catch (err) {
     res.status(403).json({ error: err.message });
   }
+});
+
+// ---- Roles ----
+
+router.get('/api/servers/:serverId/roles', async (req, res) => {
+  if (!req.perms.canManageRoles) return res.status(403).json({ error: 'Not permitted to manage roles here.' });
+  res.json(await listRoles(req.server.id));
+});
+
+router.post('/api/servers/:serverId/roles', async (req, res) => {
+  try {
+    const { name, rank, ...permissions } = req.body;
+    res.json(await createRole({ serverId: req.server.id, actingDiscordId: req.session.discordId, name, rank, permissions }));
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+router.patch('/api/servers/:serverId/roles/:roleId', async (req, res) => {
+  try {
+    res.json(
+      await updateRolePermissions({
+        serverId: req.server.id,
+        actingDiscordId: req.session.discordId,
+        roleId: req.params.roleId,
+        permissions: req.body,
+      }),
+    );
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+router.delete('/api/servers/:serverId/roles/:roleId', async (req, res) => {
+  try {
+    await deleteRole({ serverId: req.server.id, actingDiscordId: req.session.discordId, roleId: req.params.roleId });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+// ---- Members ----
+
+router.get('/api/servers/:serverId/members', async (req, res) => {
+  if (!req.perms.canManageRoles) return res.status(403).json({ error: 'Not permitted to manage members here.' });
+  res.json(await listMembers(req.server.id));
+});
+
+router.post('/api/servers/:serverId/members/:discordId/role', async (req, res) => {
+  try {
+    res.json(
+      await promoteMember({
+        serverId: req.server.id,
+        actingDiscordId: req.session.discordId,
+        targetDiscordId: req.params.discordId,
+        newRoleId: req.body.roleId,
+      }),
+    );
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+router.post('/api/servers/:serverId/members/:discordId/kick', async (req, res) => {
+  try {
+    await kickMember({ serverId: req.server.id, actingDiscordId: req.session.discordId, targetDiscordId: req.params.discordId });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+router.post('/api/servers/:serverId/members/:discordId/ban', async (req, res) => {
+  try {
+    await banMember({
+      serverId: req.server.id,
+      actingDiscordId: req.session.discordId,
+      targetDiscordId: req.params.discordId,
+      reason: req.body.reason,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+router.post('/api/servers/:serverId/members/:discordId/unban', async (req, res) => {
+  try {
+    await unbanMember({ serverId: req.server.id, actingDiscordId: req.session.discordId, targetDiscordId: req.params.discordId });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+router.get('/api/servers/:serverId/banned', async (req, res) => {
+  if (!req.perms.canBanMembers) return res.status(403).json({ error: 'Not permitted to view bans here.' });
+  res.json(await listBannedMembers(req.server.id));
+});
+
+// ---- Audit log ----
+
+router.get('/api/servers/:serverId/audit-log', async (req, res) => {
+  if (!req.perms.canManageRoles) return res.status(403).json({ error: 'Not permitted to view the audit log here.' });
+  res.json(await listAuditLog(req.server.id));
 });
 
 module.exports = router;
