@@ -23,6 +23,8 @@ const {
   banMember,
   unbanMember,
   listAuditLog,
+  getLeaderboard,
+  adjustPointsManually,
 } = require('@bugtracker/db');
 const { postRetestMessage } = require('../lib/discordRest');
 const requireAuthApi = require('../middleware/requireAuthApi');
@@ -289,6 +291,28 @@ router.get('/api/servers/:serverId/banned', async (req, res) => {
 router.get('/api/servers/:serverId/audit-log', async (req, res) => {
   if (!req.perms.canManageRoles) return res.status(403).json({ error: 'Not permitted to view the audit log here.' });
   res.json(await listAuditLog(req.server.id));
+});
+
+// ---- Leaderboard ----
+
+router.get('/api/servers/:serverId/leaderboard', async (req, res) => {
+  res.json(await getLeaderboard(req.server.id));
+});
+
+router.post('/api/servers/:serverId/leaderboard/:discordId/adjust', async (req, res) => {
+  if (!req.perms.canManageBugs) return res.status(403).json({ error: 'Not permitted to adjust points here.' });
+  try {
+    res.json(
+      await adjustPointsManually({
+        serverId: req.server.id,
+        actingDiscordId: req.session.discordId,
+        targetDiscordId: req.params.discordId,
+        delta: Number(req.body.delta),
+      }),
+    );
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
 });
 
 module.exports = router;

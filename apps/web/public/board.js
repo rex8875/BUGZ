@@ -44,6 +44,7 @@ async function load() {
     state.permissions = me.permissions;
     state.retestChannelId = me.retestChannelId;
     document.getElementById('server-name').textContent = 'Bug dashboard';
+    document.getElementById('leaderboard-link').href = `/dashboard/${serverId}/leaderboard`;
     if (state.permissions.canManageSettings || state.permissions.canShareDashboard) {
       document.getElementById('settings-btn').style.display = 'inline-block';
     }

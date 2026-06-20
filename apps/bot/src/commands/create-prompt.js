@@ -3,7 +3,7 @@ const { getServerByDiscordId, getMembership } = require('@bugtracker/db');
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('post-report-button')
+    .setName('create-prompt')
     .setDescription('Post the "Report bug" button in this channel'),
 
   async execute(interaction) {
@@ -19,7 +19,10 @@ module.exports = {
 
     const embed = new EmbedBuilder()
       .setTitle('Report a bug')
-      .setDescription('Click below to open the bug report form. Have your evidence ready.')
+      .setDescription(
+        'Click below to open the bug report form. Have your evidence ready.\n\n' +
+          'Please check `/list-bugs` first to see if it\'s already been reported — duplicates get marked as such and the point for finding it gets reversed.',
+      )
       .setColor(0x3ba55d);
 
     const button = new ButtonBuilder()

@@ -236,9 +236,10 @@ async function listAccessibleServers(discordId) {
   ];
 }
 
-// actingDiscordId must have canManageRoles, and can only promote to a
-// rank strictly below their own — stops a Dev handing out Owner, and
-// stops anyone promoting a peer to their own level.
+// actingDiscordId must have canManageRoles, and can only act on someone
+// strictly below their own rank — both checked: the target's CURRENT
+// rank (can't touch a peer or superior's role at all) and the new
+// role's rank (can't hand out your own rank or above).
 async function promoteMember({ serverId, actingDiscordId, targetDiscordId, newRoleId }) {
   const acting = await getMembership(serverId, actingDiscordId);
   if (!acting || !acting.role.canManageRoles) {
@@ -247,6 +248,16 @@ async function promoteMember({ serverId, actingDiscordId, targetDiscordId, newRo
 
   if (await isBanned(serverId, targetDiscordId)) {
     throw new Error('That person is banned from this server — unban them first.');
+  }
+
+  const server = await prisma.server.findUnique({ where: { id: serverId } });
+  if (server.ownerDiscordId === targetDiscordId) {
+    throw new Error("Cannot change the server owner's role — transfer ownership first.");
+  }
+
+  const currentMembership = await getMembership(serverId, targetDiscordId);
+  if (currentMembership && currentMembership.role.rank >= acting.role.rank) {
+    throw new Error('Cannot change the role of someone at or above your own rank.');
   }
 
   const newRole = await prisma.role.findFirst({ where: { id: newRoleId, serverId } });
@@ -438,6 +449,35 @@ async function redeemShareLink({ shareLinkId, discordId }) {
   });
 }
 
+// ---- Leaderboard ---------------------------------------------------
+
+async function adjustLeaderboardPoints(serverId, userId, delta) {
+  await prisma.leaderboardScore.upsert({
+    where: { serverId_userId: { serverId, userId } },
+    update: { points: { increment: delta } },
+    create: { serverId, userId, points: Math.max(delta, 0) },
+  });
+}
+
+async function getLeaderboard(serverId) {
+  return prisma.leaderboardScore.findMany({
+    where: { serverId },
+    include: { user: true },
+    orderBy: { points: 'desc' },
+  });
+}
+
+// Manual override for a dev correcting a score for reasons other than
+// the automatic duplicate adjustment below — e.g. a penalty, or fixing
+// a mistake. Gated on canManageBugs at the API layer.
+async function adjustPointsManually({ serverId, actingDiscordId, targetDiscordId, delta }) {
+  const targetUser = await prisma.user.findUnique({ where: { discordId: targetDiscordId } });
+  if (!targetUser) throw new Error('That person has not verified yet.');
+  await adjustLeaderboardPoints(serverId, targetUser.id, delta);
+  await logAction(serverId, actingDiscordId, 'POINTS_ADJUSTED', { target: targetDiscordId, delta });
+  return getLeaderboard(serverId);
+}
+
 // ---- Bug reports -------------------------------------------------------
 
 async function createBugReport(serverId, reporterDiscordId, data) {
@@ -450,8 +490,30 @@ async function createBugReport(serverId, reporterDiscordId, data) {
     throw new Error('You do not have permission to report bugs in this server.');
   }
 
-  return prisma.bugReport.create({
+  const report = await prisma.bugReport.create({
     data: { serverId, reporterId: membership.userId, ...data },
+  });
+
+  // Each submitted bug is worth a point immediately — see the
+  // DUPLICATE handling in updateBugReport for how that gets corrected
+  // if it turns out not to be a unique find.
+  await adjustLeaderboardPoints(serverId, membership.userId, 1);
+
+  return report;
+}
+
+// For a tester self-checking before they report something — the
+// process here is manual (people look themselves), not automatic
+// duplicate detection, so this just needs to be searchable by keyword.
+async function searchBugReports(serverId, search) {
+  return prisma.bugReport.findMany({
+    where: {
+      serverId,
+      archivedAt: null,
+      ...(search ? { title: { contains: search } } : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 25,
   });
 }
 
@@ -488,12 +550,25 @@ async function getBugReport(serverId, bugReportId) {
 
 // Every mutation re-checks serverId on the where clause, not just the id —
 // so even a guessed/leaked report id can't be edited from the wrong server.
+// Also handles the leaderboard side-effect of a status moving into or
+// out of DUPLICATE — exactly one point deducted/refunded per report,
+// ever, tracked via pointDeducted so flapping the status back and forth
+// can't double-charge or double-refund.
 async function updateBugReport(serverId, bugReportId, data) {
-  const { count } = await prisma.bugReport.updateMany({
-    where: { id: bugReportId, serverId },
-    data,
-  });
-  if (count === 0) throw new Error('Bug report not found in this server.');
+  const existing = await prisma.bugReport.findFirst({ where: { id: bugReportId, serverId } });
+  if (!existing) throw new Error('Bug report not found in this server.');
+
+  if (data.status && data.status !== existing.status) {
+    if (data.status === 'DUPLICATE' && !existing.pointDeducted) {
+      await adjustLeaderboardPoints(serverId, existing.reporterId, -1);
+      data = { ...data, pointDeducted: true };
+    } else if (existing.status === 'DUPLICATE' && data.status !== 'DUPLICATE' && existing.pointDeducted) {
+      await adjustLeaderboardPoints(serverId, existing.reporterId, 1);
+      data = { ...data, pointDeducted: false };
+    }
+  }
+
+  await prisma.bugReport.updateMany({ where: { id: bugReportId, serverId }, data });
   return prisma.bugReport.findUnique({ where: { id: bugReportId } });
 }
 
@@ -562,6 +637,7 @@ module.exports = {
   listShareLinks,
   redeemShareLink,
   createBugReport,
+  searchBugReports,
   listMyBugReports,
   getBugReport,
   listBugReports,
@@ -569,4 +645,6 @@ module.exports = {
   deleteBugReport,
   getReportSummary,
   deleteExpiredArchivedReports,
+  getLeaderboard,
+  adjustPointsManually,
 };

@@ -19,6 +19,7 @@ model User {
   memberships     Membership[]
   bugReports      BugReport[]  @relation("ReportedBy")
   guestAccess     GuestAccess[]
+  leaderboard     LeaderboardScore[]
 }
 
 // One Discord server using the system. Everything else is scoped
@@ -37,6 +38,7 @@ model Server {
   guestAccess     GuestAccess[]
   bannedMembers   BannedMember[]
   auditLog        AuditLogEntry[]
+  leaderboard     LeaderboardScore[]
 }
 
 // Custom rank defined per-server by the owner. Not hardcoded to
@@ -195,4 +197,24 @@ model BugReport {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
   archivedAt        DateTime?
+  // True once a point has been deducted for this report being marked
+  // DUPLICATE — lets the status flip back and forth without double
+  // deducting or double-refunding.
+  pointDeducted    Boolean    @default(false)
+}
+
+// Persistent per-server score, deliberately NOT derived by counting
+// BugReport rows — archived reports get hard-deleted after 15 days,
+// which would silently erase history if points were just a live count.
+// Also untouched by kick/rejoin, so a tester's record survives that.
+model LeaderboardScore {
+  id        String   @id @default(cuid())
+  serverId  String
+  server    Server   @relation(fields: [serverId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  points    Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([serverId, userId])
 }
