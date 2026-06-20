@@ -1,6 +1,10 @@
 const serverId = window.location.pathname.split('/')[2];
 document.getElementById('back-link').href = `/dashboard/${serverId}`;
 
+let canAdjust = false;
+let tab = 'all-time';
+let weekStart = null; // null = current week, server resolves it
+
 async function api(path, options = {}) {
   const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
   if (res.status === 401) {
@@ -22,20 +26,54 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+document.querySelectorAll('#lb-tabs [data-tab]').forEach((el) => {
+  el.addEventListener('click', () => {
+    tab = el.dataset.tab;
+    weekStart = null;
+    document.querySelectorAll('#lb-tabs [data-tab]').forEach((t) => t.classList.toggle('active', t === el));
+    document.getElementById('week-nav').style.display = tab === 'weekly' ? 'block' : 'none';
+    load();
+  });
+});
+
+document.getElementById('prev-week').addEventListener('click', () => {
+  const d = weekStart ? new Date(weekStart) : new Date();
+  d.setUTCDate(d.getUTCDate() - 7);
+  weekStart = d.toISOString();
+  load();
+});
+
+document.getElementById('next-week').addEventListener('click', () => {
+  const d = weekStart ? new Date(weekStart) : new Date();
+  d.setUTCDate(d.getUTCDate() + 7);
+  weekStart = d.toISOString();
+  load();
+});
+
 async function load() {
   try {
     const me = await api(`/api/servers/${serverId}/me`);
-    const scores = await api(`/api/servers/${serverId}/leaderboard`);
-    render(scores, me.permissions.canManageBugs);
+    canAdjust = me.permissions.canManageBugs;
+
+    if (tab === 'all-time') {
+      const scores = await api(`/api/servers/${serverId}/leaderboard`);
+      render(scores);
+    } else {
+      const params = weekStart ? `?weekStart=${encodeURIComponent(weekStart)}` : '';
+      const result = await api(`/api/servers/${serverId}/leaderboard/weekly${params}`);
+      const label = new Date(result.weekStart);
+      document.getElementById('week-label').textContent = `Week of ${label.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+      render(result.scores);
+    }
   } catch (err) {
     showError(err.message);
   }
 }
 
-function render(scores, canAdjust) {
+function render(scores) {
   const board = document.getElementById('board');
   if (scores.length === 0) {
-    board.innerHTML = '<div class="hint">No points on the board yet.</div>';
+    board.innerHTML = '<div class="hint">No points here yet.</div>';
     return;
   }
 
@@ -47,7 +85,7 @@ function render(scores, canAdjust) {
         <div style="width:28px;">${medals[i] || i + 1}</div>
         <div style="flex:1;">${escapeHtml(s.user.discordUsername)}</div>
         <div><strong>${s.points}</strong> pt${s.points === 1 ? '' : 's'}</div>
-        ${canAdjust ? '<button data-adjust="-1">-1</button><button data-adjust="1">+1</button>' : ''}
+        ${tab === 'all-time' && canAdjust ? '<button data-adjust="-1">-1</button><button data-adjust="1">+1</button>' : ''}
       </div>`,
     )
     .join('');

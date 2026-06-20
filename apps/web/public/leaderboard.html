@@ -13,6 +13,15 @@
     </div>
     <div id="error" class="error-banner" style="display:none;"></div>
     <div class="hint" style="margin-bottom:14px;">One point per bug reported. Marking a report Duplicate reverses the point.</div>
+    <div class="filters" id="lb-tabs">
+      <div class="filter-pill active" data-tab="all-time">All-time</div>
+      <div class="filter-pill" data-tab="weekly">This week</div>
+    </div>
+    <div id="week-nav" style="display:none; margin-bottom:10px;">
+      <button id="prev-week">← Previous week</button>
+      <span id="week-label" class="hint"></span>
+      <button id="next-week">Next week →</button>
+    </div>
     <div id="board"></div>
   </div>
   <script src="/leaderboard.js"></script>

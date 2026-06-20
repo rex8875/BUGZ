@@ -24,6 +24,7 @@ const {
   unbanMember,
   listAuditLog,
   getLeaderboard,
+  getWeeklyLeaderboard,
   adjustPointsManually,
 } = require('@bugtracker/db');
 const { postRetestMessage } = require('../lib/discordRest');
@@ -297,6 +298,11 @@ router.get('/api/servers/:serverId/audit-log', async (req, res) => {
 
 router.get('/api/servers/:serverId/leaderboard', async (req, res) => {
   res.json(await getLeaderboard(req.server.id));
+});
+
+router.get('/api/servers/:serverId/leaderboard/weekly', async (req, res) => {
+  const weekStart = req.query.weekStart ? new Date(req.query.weekStart) : undefined;
+  res.json(await getWeeklyLeaderboard(req.server.id, { weekStart }));
 });
 
 router.post('/api/servers/:serverId/leaderboard/:discordId/adjust', async (req, res) => {

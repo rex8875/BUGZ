@@ -20,6 +20,7 @@ model User {
   bugReports      BugReport[]  @relation("ReportedBy")
   guestAccess     GuestAccess[]
   leaderboard     LeaderboardScore[]
+  weeklyScores    WeeklyScore[]
 }
 
 // One Discord server using the system. Everything else is scoped
@@ -39,6 +40,7 @@ model Server {
   bannedMembers   BannedMember[]
   auditLog        AuditLogEntry[]
   leaderboard     LeaderboardScore[]
+  weeklyScores    WeeklyScore[]
 }
 
 // Custom rank defined per-server by the owner. Not hardcoded to
@@ -217,4 +219,22 @@ model LeaderboardScore {
   updatedAt DateTime @updatedAt
 
   @@unique([serverId, userId])
+}
+
+// Same rationale as LeaderboardScore — persisted rather than computed
+// by counting reports in a date range, since old reports do eventually
+// get deleted. weekStart is normalized to the Monday of whichever week
+// the report was originally created in, so a late Duplicate correction
+// still lands on the right week's score, not whatever week it happens
+// to be when the correction is made.
+model WeeklyScore {
+  id        String   @id @default(cuid())
+  serverId  String
+  server    Server   @relation(fields: [serverId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  weekStart DateTime
+  points    Int      @default(0)
+
+  @@unique([serverId, userId, weekStart])
 }

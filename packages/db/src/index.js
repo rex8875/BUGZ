@@ -451,11 +451,30 @@ async function redeemShareLink({ shareLinkId, discordId }) {
 
 // ---- Leaderboard ---------------------------------------------------
 
+// Normalizes any date to the Monday 00:00 UTC of its week, so a report
+// created any time during a week buckets to the same weekStart value.
+function getWeekStart(date) {
+  const d = new Date(date);
+  const day = d.getUTCDay(); // 0 = Sunday ... 6 = Saturday
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diffToMonday);
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
 async function adjustLeaderboardPoints(serverId, userId, delta) {
   await prisma.leaderboardScore.upsert({
     where: { serverId_userId: { serverId, userId } },
     update: { points: { increment: delta } },
     create: { serverId, userId, points: Math.max(delta, 0) },
+  });
+}
+
+async function adjustWeeklyPoints(serverId, userId, weekStart, delta) {
+  await prisma.weeklyScore.upsert({
+    where: { serverId_userId_weekStart: { serverId, userId, weekStart } },
+    update: { points: { increment: delta } },
+    create: { serverId, userId, weekStart, points: Math.max(delta, 0) },
   });
 }
 
@@ -467,6 +486,21 @@ async function getLeaderboard(serverId) {
   });
 }
 
+// Defaults to the current week. Pass a date that falls in a past week
+// to look up that week's standings instead (e.g. for "last week's
+// winner" — still works after old reports themselves are long deleted,
+// since this is read from the persisted WeeklyScore table, not from
+// counting reports).
+async function getWeeklyLeaderboard(serverId, { weekStart } = {}) {
+  const week = weekStart ? getWeekStart(weekStart) : getWeekStart(new Date());
+  const scores = await prisma.weeklyScore.findMany({
+    where: { serverId, weekStart: week },
+    include: { user: true },
+    orderBy: { points: 'desc' },
+  });
+  return { weekStart: week, scores };
+}
+
 // Manual override for a dev correcting a score for reasons other than
 // the automatic duplicate adjustment below — e.g. a penalty, or fixing
 // a mistake. Gated on canManageBugs at the API layer.
@@ -474,6 +508,7 @@ async function adjustPointsManually({ serverId, actingDiscordId, targetDiscordId
   const targetUser = await prisma.user.findUnique({ where: { discordId: targetDiscordId } });
   if (!targetUser) throw new Error('That person has not verified yet.');
   await adjustLeaderboardPoints(serverId, targetUser.id, delta);
+  await adjustWeeklyPoints(serverId, targetUser.id, getWeekStart(new Date()), delta);
   await logAction(serverId, actingDiscordId, 'POINTS_ADJUSTED', { target: targetDiscordId, delta });
   return getLeaderboard(serverId);
 }
@@ -494,10 +529,12 @@ async function createBugReport(serverId, reporterDiscordId, data) {
     data: { serverId, reporterId: membership.userId, ...data },
   });
 
-  // Each submitted bug is worth a point immediately — see the
-  // DUPLICATE handling in updateBugReport for how that gets corrected
-  // if it turns out not to be a unique find.
+  // Each submitted bug is worth a point immediately, both all-time and
+  // for the week it was reported in — see the DUPLICATE handling in
+  // updateBugReport for how that gets corrected if it turns out not to
+  // be a unique find.
   await adjustLeaderboardPoints(serverId, membership.userId, 1);
+  await adjustWeeklyPoints(serverId, membership.userId, getWeekStart(report.createdAt), 1);
 
   return report;
 }
@@ -559,11 +596,14 @@ async function updateBugReport(serverId, bugReportId, data) {
   if (!existing) throw new Error('Bug report not found in this server.');
 
   if (data.status && data.status !== existing.status) {
+    const reportWeek = getWeekStart(existing.createdAt);
     if (data.status === 'DUPLICATE' && !existing.pointDeducted) {
       await adjustLeaderboardPoints(serverId, existing.reporterId, -1);
+      await adjustWeeklyPoints(serverId, existing.reporterId, reportWeek, -1);
       data = { ...data, pointDeducted: true };
     } else if (existing.status === 'DUPLICATE' && data.status !== 'DUPLICATE' && existing.pointDeducted) {
       await adjustLeaderboardPoints(serverId, existing.reporterId, 1);
+      await adjustWeeklyPoints(serverId, existing.reporterId, reportWeek, 1);
       data = { ...data, pointDeducted: false };
     }
   }
@@ -646,5 +686,6 @@ module.exports = {
   getReportSummary,
   deleteExpiredArchivedReports,
   getLeaderboard,
+  getWeeklyLeaderboard,
   adjustPointsManually,
 };
