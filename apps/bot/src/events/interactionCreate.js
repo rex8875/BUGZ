@@ -16,6 +16,19 @@ function retryButtonRow() {
 module.exports = {
   name: 'interactionCreate',
   async execute(interaction) {
+    // ---- Autocomplete (e.g. /set-role's role option) ----
+    if (interaction.isAutocomplete()) {
+      const command = interaction.client.commands.get(interaction.commandName);
+      if (command?.autocomplete) {
+        try {
+          await command.autocomplete(interaction);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      return;
+    }
+
     // ---- Slash commands ----
     if (interaction.isChatInputCommand()) {
       const command = interaction.client.commands.get(interaction.commandName);

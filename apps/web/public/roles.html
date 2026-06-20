@@ -29,6 +29,14 @@
 
     <section style="margin-top:28px;">
       <h2>Members</h2>
+      <div class="detail-panel" style="margin-bottom:10px;">
+        <div class="field-group">
+          <div><label>Discord ID</label><input type="text" id="new-member-id" placeholder="Numeric Discord ID" /></div>
+          <div><label>Role</label><select id="new-member-role"></select></div>
+        </div>
+        <button id="add-member-btn" class="primary" style="margin-top:8px;">Add member</button>
+        <div class="hint" style="margin-top:6px;">They must have already run /verify once. Easier to do this with `/set-role` in Discord directly — this is a fallback for when you already have their ID.</div>
+      </div>
       <div id="member-list"></div>
     </section>
 

@@ -60,6 +60,9 @@ async function load() {
 
     roles = await api(`/api/servers/${serverId}/roles`);
     renderRoles();
+    document.getElementById('new-member-role').innerHTML = roles
+      .map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`)
+      .join('');
 
     const members = await api(`/api/servers/${serverId}/members`);
     renderMembers(members);
@@ -73,6 +76,20 @@ async function load() {
     showError(err.message);
   }
 }
+
+document.getElementById('add-member-btn').addEventListener('click', async () => {
+  const discordId = document.getElementById('new-member-id').value.trim();
+  const roleId = document.getElementById('new-member-role').value;
+  if (!discordId) return showError('Enter a Discord ID.');
+
+  try {
+    await api(`/api/servers/${serverId}/members/${discordId}/role`, { method: 'POST', body: JSON.stringify({ roleId }) });
+    document.getElementById('new-member-id').value = '';
+    await load();
+  } catch (err) {
+    showError(err.message);
+  }
+});
 
 function renderRoles() {
   document.getElementById('role-list').innerHTML = roles
