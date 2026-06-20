@@ -505,6 +505,9 @@ async function getWeeklyLeaderboard(serverId, { weekStart } = {}) {
 // the automatic duplicate adjustment below — e.g. a penalty, or fixing
 // a mistake. Gated on canManageBugs at the API layer.
 async function adjustPointsManually({ serverId, actingDiscordId, targetDiscordId, delta }) {
+  const perms = await getEffectivePermissions(serverId, actingDiscordId);
+  if (!perms?.canManageBugs) throw new Error('Not permitted to adjust points in this server.');
+
   const targetUser = await prisma.user.findUnique({ where: { discordId: targetDiscordId } });
   if (!targetUser) throw new Error('That person has not verified yet.');
   await adjustLeaderboardPoints(serverId, targetUser.id, delta);
@@ -541,13 +544,16 @@ async function createBugReport(serverId, reporterDiscordId, data) {
 
 // For a tester self-checking before they report something — the
 // process here is manual (people look themselves), not automatic
-// duplicate detection, so this just needs to be searchable by keyword.
-async function searchBugReports(serverId, search) {
+// duplicate detection, so this just needs to be searchable by keyword
+// and filterable by priority (the "tag" filtering testers were always
+// meant to have, just via the bot rather than the web dashboard).
+async function searchBugReports(serverId, { search, priority } = {}) {
   return prisma.bugReport.findMany({
     where: {
       serverId,
       archivedAt: null,
       ...(search ? { title: { contains: search } } : {}),
+      ...(priority ? { priority } : {}),
     },
     orderBy: { createdAt: 'desc' },
     take: 25,
@@ -565,13 +571,13 @@ async function listMyBugReports(serverId, reporterDiscordId) {
   });
 }
 
-async function listBugReports(serverId, { priority, status, includeArchived = false } = {}) {
+async function listBugReports(serverId, { priority, status, archivedOnly = false } = {}) {
   return prisma.bugReport.findMany({
     where: {
       serverId,
       ...(priority ? { priority } : {}),
       ...(status ? { status } : {}),
-      ...(includeArchived ? {} : { archivedAt: null }),
+      archivedAt: archivedOnly ? { not: null } : null,
     },
     include: { reporter: true },
     orderBy: { createdAt: 'desc' },
@@ -587,24 +593,56 @@ async function getBugReport(serverId, bugReportId) {
 
 // Every mutation re-checks serverId on the where clause, not just the id —
 // so even a guessed/leaked report id can't be edited from the wrong server.
+// Also re-derives permissions itself rather than trusting the caller to
+// have pre-filtered requestedChanges — status/priority needs canManageBugs,
+// content fields need canEditReports, checked here regardless of what the
+// route layer already did.
 // Also handles the leaderboard side-effect of a status moving into or
 // out of DUPLICATE — exactly one point deducted/refunded per report,
 // ever, tracked via pointDeducted so flapping the status back and forth
 // can't double-charge or double-refund.
-async function updateBugReport(serverId, bugReportId, data) {
+async function updateBugReport({ serverId, actingDiscordId, bugReportId, requestedChanges }) {
   const existing = await prisma.bugReport.findFirst({ where: { id: bugReportId, serverId } });
   if (!existing) throw new Error('Bug report not found in this server.');
+
+  const perms = await getEffectivePermissions(serverId, actingDiscordId);
+  const data = {};
+
+  if (perms?.canManageBugs) {
+    if (requestedChanges.priority !== undefined) data.priority = requestedChanges.priority;
+    if (requestedChanges.status !== undefined) data.status = requestedChanges.status;
+  }
+  if (perms?.canEditReports) {
+    for (const field of ['title', 'description', 'stepsToReproduce', 'device', 'additionalInfo']) {
+      if (requestedChanges[field] !== undefined) data[field] = requestedChanges[field];
+    }
+  }
+  if (perms?.canPingTesters) {
+    if (requestedChanges.retestMessageId !== undefined) data.retestMessageId = requestedChanges.retestMessageId;
+    if (requestedChanges.retestThreadId !== undefined) data.retestThreadId = requestedChanges.retestThreadId;
+  }
+  if (perms?.canArchive && requestedChanges.archivedAt !== undefined) {
+    const terminal = ['FIXED', 'NOT_A_BUG', 'DUPLICATE', 'WONT_FIX'];
+    if (!terminal.includes(data.status || existing.status)) {
+      throw new Error("Status must be Fixed, Not a bug, Duplicate, or Won't fix before archiving.");
+    }
+    data.archivedAt = requestedChanges.archivedAt;
+  }
+
+  if (Object.keys(data).length === 0) {
+    throw new Error('Not permitted to make this change here.');
+  }
 
   if (data.status && data.status !== existing.status) {
     const reportWeek = getWeekStart(existing.createdAt);
     if (data.status === 'DUPLICATE' && !existing.pointDeducted) {
       await adjustLeaderboardPoints(serverId, existing.reporterId, -1);
       await adjustWeeklyPoints(serverId, existing.reporterId, reportWeek, -1);
-      data = { ...data, pointDeducted: true };
+      data.pointDeducted = true;
     } else if (existing.status === 'DUPLICATE' && data.status !== 'DUPLICATE' && existing.pointDeducted) {
       await adjustLeaderboardPoints(serverId, existing.reporterId, 1);
       await adjustWeeklyPoints(serverId, existing.reporterId, reportWeek, 1);
-      data = { ...data, pointDeducted: false };
+      data.pointDeducted = false;
     }
   }
 
@@ -614,8 +652,12 @@ async function updateBugReport(serverId, bugReportId, data) {
 
 // Permanent — for obvious spam/troll reports that shouldn't even sit in
 // the 15-day archive window. Distinct from archiving, which is meant to
-// be a soft, temporary state.
-async function deleteBugReport(serverId, bugReportId) {
+// be a soft, temporary state. Self-checks canDeleteReports rather than
+// trusting the route to have already gated this.
+async function deleteBugReport({ serverId, actingDiscordId, bugReportId }) {
+  const perms = await getEffectivePermissions(serverId, actingDiscordId);
+  if (!perms?.canDeleteReports) throw new Error('Not permitted to delete reports in this server.');
+
   const { count } = await prisma.bugReport.deleteMany({ where: { id: bugReportId, serverId } });
   if (count === 0) throw new Error('Bug report not found in this server.');
 }

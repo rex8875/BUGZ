@@ -12,6 +12,18 @@ module.exports = {
     .setDescription('Check existing bug reports before submitting a new one, to avoid duplicates')
     .addStringOption((opt) =>
       opt.setName('search').setDescription('Filter by keyword in the title').setRequired(false),
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('priority')
+        .setDescription('Filter by priority tag')
+        .setRequired(false)
+        .addChoices(
+          { name: 'Low', value: 'LOW' },
+          { name: 'Medium', value: 'MEDIUM' },
+          { name: 'High', value: 'HIGH' },
+          { name: 'Critical', value: 'CRITICAL' },
+        ),
     ),
 
   async execute(interaction) {
@@ -24,11 +36,12 @@ module.exports = {
     }
 
     const search = interaction.options.getString('search');
-    const reports = await searchBugReports(server.id, search);
+    const priority = interaction.options.getString('priority');
+    const reports = await searchBugReports(server.id, { search, priority });
 
     if (reports.length === 0) {
       return interaction.reply({
-        content: search ? `No open reports match "${search}". Looks like a new one!` : 'No open reports right now.',
+        content: search ? `No open reports match "${search}". Looks like a new one!` : 'No open reports match those filters.',
         ephemeral: true,
       });
     }

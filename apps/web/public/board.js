@@ -15,7 +15,7 @@ const state = {
   reports: [],
   selectedId: null,
   expandedId: null,
-  filter: { status: null, includeArchived: false },
+  filter: { status: null, priority: null, archived: false },
 };
 
 async function api(path, options = {}) {
@@ -73,7 +73,8 @@ async function loadSummary() {
 async function loadReports() {
   const params = new URLSearchParams();
   if (state.filter.status) params.set('status', state.filter.status);
-  params.set('includeArchived', state.filter.includeArchived ? 'true' : 'false');
+  if (state.filter.priority) params.set('priority', state.filter.priority);
+  params.set('archived', state.filter.archived ? 'true' : 'false');
   state.reports = await api(`/api/servers/${serverId}/reports?${params}`);
   renderFilters();
   renderList();
@@ -86,22 +87,34 @@ function renderFilters() {
     tabs
       .map(
         (t) =>
-          `<div class="filter-pill ${state.filter.status === t.key && !state.filter.includeArchived ? 'active' : ''}" data-status="${t.key || ''}">${t.label}</div>`,
+          `<div class="filter-pill ${state.filter.status === t.key && !state.filter.archived ? 'active' : ''}" data-status="${t.key || ''}">${t.label}</div>`,
       )
       .join('') +
-    `<div class="filter-pill ${state.filter.includeArchived ? 'active' : ''}" data-archived="1">Archived</div>`;
+    `<div class="filter-pill ${state.filter.archived ? 'active' : ''}" data-archived="1">Archived</div>`;
 
   document.getElementById('filters').querySelectorAll('[data-status]').forEach((el) => {
     el.addEventListener('click', () => {
       state.filter.status = el.dataset.status || null;
-      state.filter.includeArchived = false;
+      state.filter.archived = false;
       loadReports();
     });
   });
   document.querySelector('[data-archived]').addEventListener('click', () => {
-    state.filter.includeArchived = true;
+    state.filter.archived = true;
     state.filter.status = null;
     loadReports();
+  });
+
+  const priorityTabs = [{ key: null, label: 'All priorities' }, ...PRIORITIES.map((p) => ({ key: p, label: LABELS[p] }))];
+  document.getElementById('priority-filters').innerHTML = priorityTabs
+    .map((t) => `<div class="filter-pill ${state.filter.priority === t.key ? 'active' : ''}" data-priority="${t.key || ''}">${t.label}</div>`)
+    .join('');
+
+  document.getElementById('priority-filters').querySelectorAll('[data-priority]').forEach((el) => {
+    el.addEventListener('click', () => {
+      state.filter.priority = el.dataset.priority || null;
+      loadReports();
+    });
   });
 }
 

@@ -57,11 +57,11 @@ router.get('/api/servers/:serverId/me', (req, res) => {
 });
 
 router.get('/api/servers/:serverId/reports', async (req, res) => {
-  const { priority, status, includeArchived } = req.query;
+  const { priority, status, archived } = req.query;
   const reports = await listBugReports(req.server.id, {
     priority: priority || undefined,
     status: status || undefined,
-    includeArchived: includeArchived === 'true',
+    archivedOnly: archived === 'true',
   });
   res.json(reports);
 });
@@ -71,40 +71,26 @@ router.get('/api/servers/:serverId/summary', async (req, res) => {
 });
 
 router.patch('/api/servers/:serverId/reports/:reportId', async (req, res) => {
-  const allowed = {};
-
-  // Status/priority changes are triage — canManageBugs.
-  if (req.perms.canManageBugs) {
-    if (req.body.priority) allowed.priority = req.body.priority;
-    if (req.body.status) allowed.status = req.body.status;
-  }
-
-  // Editing the actual content is a separate, narrower permission —
-  // correcting a typo isn't the same power as triaging.
-  if (req.perms.canEditReports) {
-    for (const field of ['title', 'description', 'stepsToReproduce', 'device', 'additionalInfo']) {
-      if (req.body[field] !== undefined) allowed[field] = req.body[field];
-    }
-  }
-
-  if (Object.keys(allowed).length === 0) {
-    return res.status(403).json({ error: 'Not permitted to make this change here.' });
-  }
-
   try {
-    res.json(await updateBugReport(req.server.id, req.params.reportId, allowed));
+    res.json(
+      await updateBugReport({
+        serverId: req.server.id,
+        actingDiscordId: req.session.discordId,
+        bugReportId: req.params.reportId,
+        requestedChanges: req.body,
+      }),
+    );
   } catch (err) {
-    res.status(404).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
 router.delete('/api/servers/:serverId/reports/:reportId', async (req, res) => {
-  if (!req.perms.canDeleteReports) return res.status(403).json({ error: 'Not permitted to delete reports here.' });
   try {
-    await deleteBugReport(req.server.id, req.params.reportId);
+    await deleteBugReport({ serverId: req.server.id, actingDiscordId: req.session.discordId, bugReportId: req.params.reportId });
     res.json({ ok: true });
   } catch (err) {
-    res.status(404).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -119,7 +105,14 @@ async function handleRetestPost(req, res, { ping }) {
 
   try {
     const { messageId, threadId } = await postRetestMessage({ channelId: req.server.retestChannelId, report, ping });
-    res.json(await updateBugReport(req.server.id, report.id, { retestMessageId: messageId, retestThreadId: threadId }));
+    res.json(
+      await updateBugReport({
+        serverId: req.server.id,
+        actingDiscordId: req.session.discordId,
+        bugReportId: report.id,
+        requestedChanges: { retestMessageId: messageId, retestThreadId: threadId },
+      }),
+    );
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Could not post to the retest channel.' });
@@ -130,16 +123,18 @@ router.post('/api/servers/:serverId/reports/:reportId/ping', (req, res) => handl
 router.post('/api/servers/:serverId/reports/:reportId/retest', (req, res) => handleRetestPost(req, res, { ping: false }));
 
 router.post('/api/servers/:serverId/reports/:reportId/archive', async (req, res) => {
-  if (!req.perms.canArchive) return res.status(403).json({ error: 'Not permitted to archive here.' });
-
-  const terminalStatuses = ['FIXED', 'NOT_A_BUG', 'DUPLICATE', 'WONT_FIX'];
-  const report = await getBugReport(req.server.id, req.params.reportId);
-  if (!report) return res.status(404).json({ error: 'Report not found.' });
-  if (!terminalStatuses.includes(report.status)) {
-    return res.status(400).json({ error: "Status must be Fixed, Not a bug, Duplicate, or Won't fix before archiving." });
+  try {
+    res.json(
+      await updateBugReport({
+        serverId: req.server.id,
+        actingDiscordId: req.session.discordId,
+        bugReportId: req.params.reportId,
+        requestedChanges: { archivedAt: new Date() },
+      }),
+    );
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
-
-  res.json(await updateBugReport(req.server.id, report.id, { archivedAt: new Date() }));
 });
 
 router.get('/api/servers/:serverId/share-links', async (req, res) => {
