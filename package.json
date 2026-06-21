@@ -10,6 +10,7 @@
     "db:push": "npm run push --workspace=@bugtracker/db",
     "bot:dev": "npm run dev --workspace=@bugtracker/bot",
     "bot:deploy": "npm run deploy --workspace=@bugtracker/bot",
-    "web:dev": "npm run dev --workspace=@bugtracker/web"
+    "web:dev": "npm run dev --workspace=@bugtracker/web",
+    "test": "node --test $(find packages/db/test apps/bot/test -name '*.test.js')"
   }
 }

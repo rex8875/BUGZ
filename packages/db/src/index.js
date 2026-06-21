@@ -729,5 +729,6 @@ module.exports = {
   deleteExpiredArchivedReports,
   getLeaderboard,
   getWeeklyLeaderboard,
+  getWeekStart,
   adjustPointsManually,
 };

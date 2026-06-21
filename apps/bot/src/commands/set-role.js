@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getServerByDiscordId, promoteMember, listRoles } = require('@bugtracker/db');
+const { getServerByDiscordId, getMembership, promoteMember, listRoles } = require('@bugtracker/db');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -14,9 +14,18 @@ module.exports = {
     const server = await getServerByDiscordId(interaction.guildId);
     if (!server) return interaction.respond([]);
 
+    // Don't leak the role list to people who couldn't use it anyway —
+    // same canManageRoles check the command itself enforces.
+    const acting = await getMembership(server.id, interaction.user.id);
+    if (!acting?.role.canManageRoles) return interaction.respond([]);
+
     const focused = interaction.options.getFocused().toLowerCase();
     const roles = await listRoles(server.id);
     const matches = roles
+      // Only show roles they could actually grant — same rank ceiling
+      // promoteMember enforces, so the list itself doesn't invite a
+      // failed attempt.
+      .filter((r) => r.rank < acting.role.rank)
       .filter((r) => r.name.toLowerCase().includes(focused))
       .slice(0, 25)
       .map((r) => ({ name: `${r.name} (rank ${r.rank})`, value: r.id }));

@@ -302,13 +302,17 @@ router.get('/api/servers/:serverId/leaderboard/weekly', async (req, res) => {
 
 router.post('/api/servers/:serverId/leaderboard/:discordId/adjust', async (req, res) => {
   if (!req.perms.canManageBugs) return res.status(403).json({ error: 'Not permitted to adjust points here.' });
+
+  const delta = Number(req.body.delta);
+  if (!Number.isInteger(delta)) return res.status(400).json({ error: 'delta must be a whole number.' });
+
   try {
     res.json(
       await adjustPointsManually({
         serverId: req.server.id,
         actingDiscordId: req.session.discordId,
         targetDiscordId: req.params.discordId,
-        delta: Number(req.body.delta),
+        delta,
       }),
     );
   } catch (err) {
