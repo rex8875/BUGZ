@@ -230,6 +230,66 @@ test('{ not: null } correctly excludes fields that were never set (undefined), n
 });
 
 
+test('create() throws on a compound-unique constraint violation, matching real database behavior', () => {
+  const db = createFakePrismaClient();
+  db.role.create({ data: { serverId: 's1', name: 'Dev', rank: 50 } });
+  assert.throws(() => db.role.create({ data: { serverId: 's1', name: 'Dev', rank: 10 } }), /Unique constraint failed/);
+  // Same name, different server — must NOT collide, since the constraint is compound (serverId, name)
+  assert.doesNotThrow(() => db.role.create({ data: { serverId: 's2', name: 'Dev', rank: 50 } }));
+});
+
+test('create() throws on a single-field unique constraint violation', () => {
+  const db = createFakePrismaClient();
+  db.user.create({ data: { discordId: 'd1', discordUsername: 'Alice' } });
+  assert.throws(() => db.user.create({ data: { discordId: 'd1', discordUsername: 'Someone else' } }), /Unique constraint failed/);
+});
+
+test('update() throws if changing a field would collide with a different existing row, but not when updating other fields on the same row', () => {
+  const db = createFakePrismaClient();
+  const roleA = db.role.create({ data: { serverId: 's1', name: 'Dev', rank: 50 } });
+  db.role.create({ data: { serverId: 's1', name: 'Owner', rank: 100 } });
+
+  assert.doesNotThrow(() => db.role.update({ where: { id: roleA.id }, data: { canManageBugs: true } }), 'updating an unrelated field on the same row must not trip the uniqueness check against itself');
+  assert.throws(() => db.role.update({ where: { id: roleA.id }, data: { name: 'Owner' } }), /Unique constraint failed/);
+});
+
+
+test('create() auto-populates createdAt-style fields when omitted, matching @default(now())', () => {
+  const db = createFakePrismaClient();
+  const report = db.bugReport.create({ data: { serverId: 's1', title: 't' } });
+  assert.ok(report.createdAt instanceof Date, 'createdAt should be auto-populated, not undefined');
+});
+
+test('records created in quick succession get strictly increasing timestamps, not identical ones', () => {
+  const db = createFakePrismaClient();
+  const a = db.bugReport.create({ data: { serverId: 's1', title: 'a' } });
+  const b = db.bugReport.create({ data: { serverId: 's1', title: 'b' } });
+  const c = db.bugReport.create({ data: { serverId: 's1', title: 'c' } });
+  assert.ok(a.createdAt.getTime() < b.createdAt.getTime());
+  assert.ok(b.createdAt.getTime() < c.createdAt.getTime());
+});
+
+test('an explicitly provided timestamp is respected, not overwritten by the auto-now default', () => {
+  const db = createFakePrismaClient();
+  const explicit = new Date('2020-01-01T00:00:00Z');
+  const report = db.bugReport.create({ data: { serverId: 's1', title: 't', createdAt: explicit } });
+  assert.equal(report.createdAt.getTime(), explicit.getTime());
+});
+
+test('update() and updateMany() bump @updatedAt-style fields automatically, regardless of what data was passed', () => {
+  const db = createFakePrismaClient();
+  const report = db.bugReport.create({ data: { serverId: 's1', title: 't' } });
+  const originalUpdatedAt = report.updatedAt;
+
+  const updated = db.bugReport.update({ where: { id: report.id }, data: { title: 'changed' } });
+  assert.ok(updated.updatedAt.getTime() > (originalUpdatedAt ? originalUpdatedAt.getTime() : 0));
+
+  db.bugReport.updateMany({ where: { id: report.id }, data: { title: 'changed again' } });
+  const afterMany = db.bugReport.findUnique({ where: { id: report.id } });
+  assert.ok(afterMany.updatedAt.getTime() > updated.updatedAt.getTime());
+});
+
+
 test('each createFakePrismaClient() call is fully isolated from previous ones', () => {
   const dbA = createFakePrismaClient();
   dbA.user.create({ data: { discordId: 'only-in-a' } });

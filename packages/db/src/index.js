@@ -358,6 +358,9 @@ async function createRole({ serverId, actingDiscordId, name, rank, permissions =
   if (!acting?.role.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
   if (rank >= acting.role.rank) throw new Error('Cannot create a role at or above your own rank.');
 
+  const existing = await prisma.role.findFirst({ where: { serverId, name } });
+  if (existing) throw new Error(`A role named "${name}" already exists in this server.`);
+
   const role = await prisma.role.create({ data: { serverId, name, rank, ...permissions } });
   await logAction(serverId, actingDiscordId, 'ROLE_CREATED', { role: name, rank });
   return role;
@@ -372,6 +375,10 @@ async function updateRolePermissions({ serverId, actingDiscordId, roleId, permis
   if (target.rank >= acting.role.rank) throw new Error('Cannot edit a role at or above your own rank.');
   if (permissions.rank !== undefined && permissions.rank >= acting.role.rank) {
     throw new Error('Cannot raise a role to your own rank or above.');
+  }
+  if (permissions.name !== undefined && permissions.name !== target.name) {
+    const collision = await prisma.role.findFirst({ where: { serverId, name: permissions.name } });
+    if (collision) throw new Error(`A role named "${permissions.name}" already exists in this server.`);
   }
 
   const updated = await prisma.role.update({ where: { id: roleId }, data: permissions });

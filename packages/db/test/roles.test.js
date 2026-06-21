@@ -108,6 +108,40 @@ test('updateRolePermissions: cannot edit a role at or above your own rank, nor r
   );
 });
 
+test('createRole rejects a name that already exists in this server, with a friendly message instead of a raw database error', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupTieredServer(db);
+  await assert.rejects(
+    () => db.createRole({ serverId: server.id, actingDiscordId: 'owner1', name: 'Dev', rank: 5 }),
+    /already exists/,
+  );
+});
+
+test('createRole allows the same name in a different server (the uniqueness is per-server, not global)', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupTieredServer(db);
+  const otherServer = await db.createServerOnJoin({ discordServerId: 'gOther', name: 'Other', ownerDiscordId: 'otherOwner' });
+  await db.verifyUser({ discordId: 'otherOwner', discordUsername: 'OtherOwner' });
+  await assert.doesNotReject(() => db.createRole({ serverId: otherServer.id, actingDiscordId: 'otherOwner', name: 'Dev', rank: 5 }));
+});
+
+test('updateRolePermissions rejects renaming a role to a name already used by another role in the same server', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server, testerRole } = await setupTieredServer(db);
+  await assert.rejects(
+    () => db.updateRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', roleId: testerRole.id, permissions: { name: 'Dev' } }),
+    /already exists/,
+  );
+});
+
+test('updateRolePermissions allows "renaming" a role to its own current name (a no-op, not a collision)', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server, testerRole } = await setupTieredServer(db);
+  await assert.doesNotReject(() =>
+    db.updateRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', roleId: testerRole.id, permissions: { name: 'Tester', canSubmitBugs: false } }),
+  );
+});
+
 test('deleteRole: cannot delete a role that still has members holding it', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server, testerRole } = await setupTieredServer(db);

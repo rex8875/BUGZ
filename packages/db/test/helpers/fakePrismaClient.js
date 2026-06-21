@@ -10,6 +10,37 @@ function cuid() {
   return `id${nextId++}`;
 }
 
+// A strictly-increasing clock for auto-timestamps. Real wall-clock time
+// has millisecond resolution, so several records created in the same
+// test (the normal case — tests run fast) could otherwise get identical
+// timestamps, silently making any orderBy-by-time test pass for the
+// wrong reason (insertion-order coincidence, not real sorting).
+let fakeClockTick = 0;
+function fakeNow() {
+  fakeClockTick += 1;
+  return new Date(Date.now() + fakeClockTick);
+}
+
+// Fields that mirror @default(now()) in schema.prisma — only set if the
+// caller didn't already provide a value.
+const AUTO_NOW_ON_CREATE = {
+  user: ['createdAt'],
+  server: ['createdAt'],
+  membership: ['joinedAt'],
+  bannedMember: ['bannedAt'],
+  bugReport: ['createdAt'],
+  auditLogEntry: ['createdAt'],
+  shareLink: ['createdAt'],
+  guestAccess: ['grantedAt'],
+};
+
+// Fields that mirror @updatedAt — bumped to "now" on every update, the
+// caller's data notwithstanding.
+const AUTO_NOW_ON_UPDATE = {
+  bugReport: ['updatedAt'],
+  leaderboardScore: ['updatedAt'],
+};
+
 const SCHEMA = {
   server: {
     uniques: ['id', 'discordServerId'],
@@ -239,9 +270,24 @@ class Table {
     return include ? rows.map((r) => this.applyInclude(r, include)) : rows;
   }
 
+  checkUniqueConstraints(record, excludeId) {
+    for (const [name, fields] of Object.entries(this.schema.compoundUniques || {})) {
+      const clash = this.all().find((r) => r.id !== excludeId && fields.every((f) => valuesEqual(r[f], record[f])));
+      if (clash) throw new Error(`Unique constraint failed on ${this.name}.${name} (${fields.join(', ')})`);
+    }
+    for (const field of this.schema.uniques.filter((f) => f !== 'id')) {
+      const clash = this.all().find((r) => r.id !== excludeId && valuesEqual(r[field], record[field]));
+      if (clash) throw new Error(`Unique constraint failed on ${this.name}.${field}`);
+    }
+  }
+
   create({ data }) {
     const id = data.id || cuid();
     const record = { id, ...this.schema.defaults, ...data };
+    for (const field of AUTO_NOW_ON_CREATE[this.name] || []) {
+      if (record[field] === undefined) record[field] = fakeNow();
+    }
+    this.checkUniqueConstraints(record, null);
 
     // Nested create for relations, e.g. server.create({ data: { roles: { create: [...] } } })
     for (const [key, relation] of Object.entries(this.schema.relations)) {
@@ -261,13 +307,19 @@ class Table {
     const existing = this.findFirst({ where });
     if (!existing) throw new Error(`Record not found in ${this.name}`);
     const updated = { ...this.rows.get(existing.id), ...data };
+    for (const field of AUTO_NOW_ON_UPDATE[this.name] || []) updated[field] = fakeNow();
+    this.checkUniqueConstraints(updated, existing.id);
     this.rows.set(existing.id, updated);
     return updated;
   }
 
   updateMany({ where, data }) {
     const matches = this.all().filter((r) => this.matches(r, where));
-    for (const r of matches) this.rows.set(r.id, { ...r, ...data });
+    for (const r of matches) {
+      const updated = { ...r, ...data };
+      for (const field of AUTO_NOW_ON_UPDATE[this.name] || []) updated[field] = fakeNow();
+      this.rows.set(r.id, updated);
+    }
     return { count: matches.length };
   }
 

@@ -73,6 +73,39 @@ test('searchBugReports filters by keyword and by priority, excludes archived rep
   assert.equal(byPriority[0].title, 'Wall clips in raid');
 });
 
+test('listMyBugReports returns only the calling user\'s own reports in this server, newest first', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServer(db);
+  await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester1' });
+  await db.verifyUser({ discordId: 'tester2', discordUsername: 'Tester2' });
+  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
+  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
+  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester2', newRoleId: testerRole.id });
+
+  await db.createBugReport(server.id, 'tester1', { title: 'mine-1', description: 'd', priority: 'LOW', status: 'NEW' });
+  await db.createBugReport(server.id, 'tester2', { title: 'not-mine', description: 'd', priority: 'LOW', status: 'NEW' });
+  await db.createBugReport(server.id, 'tester1', { title: 'mine-2', description: 'd', priority: 'LOW', status: 'NEW' });
+
+  const mine = await db.listMyBugReports(server.id, 'tester1');
+  assert.equal(mine.length, 2);
+  assert.ok(mine.every((r) => r.title.startsWith('mine')));
+  assert.equal(mine[0].title, 'mine-2', 'newest first');
+});
+
+test('listMyBugReports returns an empty array for someone who has never verified', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServer(db);
+  const mine = await db.listMyBugReports(server.id, 'never-verified');
+  assert.deepEqual(mine, []);
+});
+
+test('getUserByDiscordId returns the verified user or null', async () => {
+  const { db } = loadDbWithFakePrisma();
+  await db.verifyUser({ discordId: 'someone', discordUsername: 'Someone' });
+  assert.equal((await db.getUserByDiscordId('someone')).discordUsername, 'Someone');
+  assert.equal(await db.getUserByDiscordId('never-verified'), null);
+});
+
 test('a share link can be redeemed by multiple different people, and listShareLinks reports all of them', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServer(db);
