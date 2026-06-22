@@ -49,7 +49,12 @@ router.use('/api/servers/:serverId', async (req, res, next) => {
 
 router.get('/api/servers', async (req, res) => {
   const accessible = await listAccessibleServers(req.session.discordId);
-  res.json(accessible.map((a) => ({ id: a.server.id, name: a.server.name, permissions: a.permissions })));
+  // listAccessibleServers is deliberately general (anywhere they have any
+  // standing at all). The dashboard picker specifically should only ever
+  // link to servers they can actually view — otherwise this links straight
+  // into a 403 on the board page for e.g. a Discord-only Tester.
+  const viewable = accessible.filter((a) => a.permissions.canViewDashboard);
+  res.json(viewable.map((a) => ({ id: a.server.id, name: a.server.name, permissions: a.permissions })));
 });
 
 router.get('/api/servers/:serverId/me', (req, res) => {

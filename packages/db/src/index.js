@@ -154,10 +154,21 @@ async function getMembership(serverId, discordId) {
 }
 
 function permissionsFromRole(role) {
+  // canViewDashboard is the gate every other dashboard permission sits
+  // behind. Granting e.g. canManageBugs without it would silently do
+  // nothing — easy to do by accident when setting up a custom role — so
+  // any other dashboard power implies view access too. This only affects
+  // the computed permission shape, not the stored role.canViewDashboard
+  // value itself.
+  const impliesView =
+    role.canManageBugs || role.canPingTesters || role.canArchive || role.canEditReports ||
+    role.canDeleteReports || role.canShareDashboard || role.canKickMembers || role.canBanMembers ||
+    role.canManageRoles || role.canManageSettings;
+
   return {
     source: 'member',
     canSubmitBugs: role.canSubmitBugs,
-    canViewDashboard: role.canViewDashboard,
+    canViewDashboard: role.canViewDashboard || impliesView,
     canManageBugs: role.canManageBugs,
     canPingTesters: role.canPingTesters,
     canArchive: role.canArchive,

@@ -92,6 +92,30 @@ test('a revoked share link grants no access at all, even to someone who already 
   assert.equal(perms, null, 'revoking must immediately invalidate existing redemptions, not just block new ones');
 });
 
+test('a custom role granted action permissions but not explicit canViewDashboard still gets dashboard access, not silently inert', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServerWithDevAndTester(db);
+  await db.verifyUser({ discordId: 'forgetful-owner-setup', discordUsername: 'Forgetful' });
+  // Deliberately omit canViewDashboard, like an owner forgetting to check that box
+  const role = await db.createRole({
+    serverId: server.id, actingDiscordId: 'owner1', name: 'ForgotView', rank: 20,
+    permissions: { canManageBugs: true },
+  });
+  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'forgetful-owner-setup', newRoleId: role.id });
+
+  const perms = await db.getEffectivePermissions(server.id, 'forgetful-owner-setup');
+  assert.equal(perms.canViewDashboard, true, 'canManageBugs without explicit canViewDashboard should not be a dead grant');
+  assert.equal(perms.canManageBugs, true);
+});
+
+test('Tester (no dashboard action permissions at all) still correctly has no view access — the implication only kicks in when some other power IS granted', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServerWithDevAndTester(db);
+  const perms = await db.getEffectivePermissions(server.id, 'tester1');
+  assert.equal(perms.canViewDashboard, false);
+});
+
+
 test('Tester (no extra perms) is blocked from every report mutation, even calling the data layer directly', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServerWithDevAndTester(db);
