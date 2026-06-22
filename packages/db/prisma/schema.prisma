@@ -85,26 +85,10 @@ model Membership {
   @@unique([userId, serverId])
 }
 
-enum Priority {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-}
-
-enum Status {
-  NEW
-  NEEDS_INFO
-  FIXED
-  NOT_A_BUG
-  DUPLICATE
-  WONT_FIX
-}
-
-enum GuestAccessLevel {
-  VIEW
-  DEV
-}
+// SQLite has no native enum type — Priority, Status, and access-level
+// fields below are plain Strings instead. The application code already
+// treats these as plain string literals ('LOW', 'DUPLICATE', 'DEV', etc.)
+// everywhere, so this is schema-only; nothing else needed to change.
 
 // A shareable dashboard link, scoped to one server. Lets someone who
 // isn't a member of the Discord server (a contractor, an HR reviewer)
@@ -114,7 +98,7 @@ model ShareLink {
   id                 String           @id @default(cuid())
   serverId           String
   server             Server           @relation(fields: [serverId], references: [id])
-  accessLevel        GuestAccessLevel
+  accessLevel        String
   label              String?
   createdByDiscordId String
   createdAt          DateTime         @default(now())
@@ -188,8 +172,8 @@ model BugReport {
   f9Link           String?
   additionalInfo   String?
 
-  priority         Priority   @default(MEDIUM)
-  status           Status     @default(NEW)
+  priority         String     @default("MEDIUM")
+  status           String     @default("NEW")
 
   // set once "Ping testers" or "Post in retested" fires, so we know
   // which message/thread to keep updating
