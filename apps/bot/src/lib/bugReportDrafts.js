@@ -12,7 +12,8 @@ function getDraft(discordUserId) {
     drafts.delete(discordUserId);
     return null;
   }
-  return draft;
+  const { expiresAt, ...data } = draft; // expiresAt is internal bookkeeping, never meant to leak to callers
+  return data;
 }
 
 function clearDraft(discordUserId) {

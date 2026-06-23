@@ -35,6 +35,14 @@ test('getDraft on a user with no saved draft returns null', () => {
   assert.equal(getDraft('never-saved-anything'), null);
 });
 
+test('getDraft never leaks the internal expiresAt bookkeeping field — spreading the result into a Prisma create() must be safe', () => {
+  saveDraft('user6', { title: 'test' });
+  const draft = getDraft('user6');
+  assert.ok(!('expiresAt' in draft), 'expiresAt must not appear in what callers receive, since it gets spread straight into createBugReport');
+  clearDraft('user6');
+});
+
+
 test('a draft expires after its TTL and getDraft returns null past that point', () => {
   const realNow = Date.now;
   try {

@@ -14,7 +14,11 @@ for (const file of fs.readdirSync(path.join(__dirname, 'commands'))) {
 
 for (const file of fs.readdirSync(path.join(__dirname, 'events'))) {
   const event = require(path.join(__dirname, 'events', file));
-  client.on(event.name, (...args) => event.execute(...args));
+  if (event.once) {
+    client.once(event.name, (...args) => event.execute(...args));
+  } else {
+    client.on(event.name, (...args) => event.execute(...args));
+  }
 }
 
 const ARCHIVE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // hourly is plenty for a 15-day window

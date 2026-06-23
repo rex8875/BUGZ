@@ -546,8 +546,22 @@ async function createBugReport(serverId, reporterDiscordId, data) {
     throw new Error('You do not have permission to report bugs in this server.');
   }
 
+  // Allowlisted rather than spreading `data` directly — a caller passing
+  // an extra internal field (this exact bug already happened once, via a
+  // draft-store bookkeeping field leaking in) should be silently dropped
+  // here, not threaded through to the database.
+  const allowedFields = [
+    'title', 'description', 'stepsToReproduce', 'device',
+    'evidenceFileUrl', 'evidenceLink', 'f9FileUrl', 'f9Link',
+    'additionalInfo', 'priority', 'status', 'createdAt',
+  ];
+  const reportData = {};
+  for (const field of allowedFields) {
+    if (data[field] !== undefined) reportData[field] = data[field];
+  }
+
   const report = await prisma.bugReport.create({
-    data: { serverId, reporterId: membership.userId, ...data },
+    data: { serverId, reporterId: membership.userId, ...reportData },
   });
 
   // Each submitted bug is worth a point immediately, both all-time and
