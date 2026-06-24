@@ -16,9 +16,9 @@ async function setupTieredServer(db) {
   const peerRole = await db.createRole({ serverId: server.id, actingDiscordId: 'owner1', name: 'Peer', rank: 50, permissions: {} });
   const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
 
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'dev1', newRoleId: devRole.id });
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'peer1', newRoleId: peerRole.id });
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'dev1', roleId: devRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'peer1', roleId: peerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
 
   return { server };
 }
@@ -56,7 +56,7 @@ test('kicking does NOT create a ban — the person can be re-promoted without un
   await db.kickMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1' });
 
   const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  const result = await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
+  const result = await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
   assert.ok(result, 're-adding a kicked (not banned) person should work with no unban step');
 });
 
@@ -77,7 +77,7 @@ test('banMember removes membership AND blocks rejoining until unbanned', async (
 
   const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
   await assert.rejects(
-    () => db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id }),
+    () => db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id }),
     /banned/,
   );
 

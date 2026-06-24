@@ -49,11 +49,11 @@ test('the same Discord person can hold completely different roles in two differe
   await db.verifyUser({ discordId: 'multiserver', discordUsername: 'MultiServer' });
 
   const testerRoleA = (await db.listRoles(serverA.id)).find((r) => r.name === 'Tester');
-  await db.promoteMember({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver', newRoleId: testerRoleA.id });
+  await db.grantRole({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver', roleId: testerRoleA.id });
 
   // In server B, promote them all the way to Owner-tier via a custom role
   const leadRoleB = await db.createRole({ serverId: serverB.id, actingDiscordId: 'ownerB', name: 'Lead', rank: 90, permissions: { canManageBugs: true, canManageRoles: true } });
-  await db.promoteMember({ serverId: serverB.id, actingDiscordId: 'ownerB', targetDiscordId: 'multiserver', newRoleId: leadRoleB.id });
+  await db.grantRole({ serverId: serverB.id, actingDiscordId: 'ownerB', targetDiscordId: 'multiserver', roleId: leadRoleB.id });
 
   const permsA = await db.getEffectivePermissions(serverA.id, 'multiserver');
   const permsB = await db.getEffectivePermissions(serverB.id, 'multiserver');
@@ -70,8 +70,8 @@ test('a kick/ban in one server has zero effect on the same person\'s standing in
 
   const testerRoleA = (await db.listRoles(serverA.id)).find((r) => r.name === 'Tester');
   const testerRoleB = (await db.listRoles(serverB.id)).find((r) => r.name === 'Tester');
-  await db.promoteMember({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver', newRoleId: testerRoleA.id });
-  await db.promoteMember({ serverId: serverB.id, actingDiscordId: 'ownerB', targetDiscordId: 'multiserver', newRoleId: testerRoleB.id });
+  await db.grantRole({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver', roleId: testerRoleA.id });
+  await db.grantRole({ serverId: serverB.id, actingDiscordId: 'ownerB', targetDiscordId: 'multiserver', roleId: testerRoleB.id });
 
   await db.banMember({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver' });
 
@@ -97,8 +97,8 @@ test('leaderboard scores never mix between servers, even for the same person', a
   await db.verifyUser({ discordId: 'multiserver', discordUsername: 'MultiServer' });
   const testerRoleA = (await db.listRoles(serverA.id)).find((r) => r.name === 'Tester');
   const testerRoleB = (await db.listRoles(serverB.id)).find((r) => r.name === 'Tester');
-  await db.promoteMember({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver', newRoleId: testerRoleA.id });
-  await db.promoteMember({ serverId: serverB.id, actingDiscordId: 'ownerB', targetDiscordId: 'multiserver', newRoleId: testerRoleB.id });
+  await db.grantRole({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver', roleId: testerRoleA.id });
+  await db.grantRole({ serverId: serverB.id, actingDiscordId: 'ownerB', targetDiscordId: 'multiserver', roleId: testerRoleB.id });
 
   await db.createBugReport(serverA.id, 'multiserver', { title: 'a1', description: 'd', priority: 'LOW', status: 'NEW' });
   await db.createBugReport(serverA.id, 'multiserver', { title: 'a2', description: 'd', priority: 'LOW', status: 'NEW' });
@@ -116,7 +116,7 @@ test('listAccessibleServers only returns servers the person actually has standin
   const { serverA, serverB } = await setupTwoServers(db);
   await db.verifyUser({ discordId: 'onlyA', discordUsername: 'OnlyA' });
   const testerRoleA = (await db.listRoles(serverA.id)).find((r) => r.name === 'Tester');
-  await db.promoteMember({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'onlyA', newRoleId: testerRoleA.id });
+  await db.grantRole({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'onlyA', roleId: testerRoleA.id });
 
   const accessible = await db.listAccessibleServers('onlyA');
   assert.equal(accessible.length, 1);

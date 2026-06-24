@@ -7,7 +7,7 @@ async function setupServer(db) {
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
   await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester' });
   const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
   return { server };
 }
 

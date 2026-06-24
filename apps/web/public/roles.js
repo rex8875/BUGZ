@@ -83,7 +83,7 @@ document.getElementById('add-member-btn').addEventListener('click', async () => 
   if (!discordId) return showError('Enter a Discord ID.');
 
   try {
-    await api(`/api/servers/${serverId}/members/${discordId}/role`, { method: 'POST', body: JSON.stringify({ roleId }) });
+    await api(`/api/servers/${serverId}/members/${discordId}/roles/${roleId}/grant`, { method: 'POST' });
     document.getElementById('new-member-id').value = '';
     await load();
   } catch (err) {
@@ -98,7 +98,7 @@ function renderRoles() {
       <div class="role-card" data-role-id="${role.id}">
         <div class="role-card-header">
           <strong>${escapeHtml(role.name)}</strong>
-          <span class="hint">rank ${role.rank}</span>
+          <label class="hint" style="display:flex; align-items:center; gap:4px;">rank <input type="number" data-rank-input value="${role.rank}" style="width:60px;" /></label>
         </div>
         <div class="perm-grid">${permGridHtml(`role-${role.id}`, role)}</div>
         <div style="margin-top:10px; display:flex; gap:8px;">
@@ -113,6 +113,8 @@ function renderRoles() {
     btn.addEventListener('click', async () => {
       const card = btn.closest('[data-role-id]');
       const perms = readPermGrid(card);
+      const rank = parseInt(card.querySelector('[data-rank-input]').value, 10);
+      if (!Number.isNaN(rank)) perms.rank = rank;
       try {
         await api(`/api/servers/${serverId}/roles/${btn.dataset.saveRole}`, { method: 'PATCH', body: JSON.stringify(perms) });
         await load();
@@ -152,29 +154,42 @@ document.getElementById('create-role-btn').addEventListener('click', async () =>
   }
 });
 
+// Each member shows a checkbox per server role — checked if they hold it.
+// Toggling grants or revokes that ONE role immediately, leaving every
+// other role they hold untouched, matching real Discord role behavior.
 function renderMembers(members) {
-  const roleOptions = (currentRoleId) =>
-    roles.map((r) => `<option value="${r.id}" ${r.id === currentRoleId ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
-
   document.getElementById('member-list').innerHTML = members
-    .map(
-      (m) => `
-      <div class="member-row" data-discord-id="${m.user.discordId}">
-        <div style="flex:1;">${escapeHtml(m.user.discordUsername)}</div>
-        <select data-role-select>${roleOptions(m.roleId)}</select>
+    .map((m) => {
+      const heldRoleIds = new Set(m.roles.map((mr) => mr.roleId));
+      const roleChips = roles
+        .map(
+          (r) => `
+          <label style="display:inline-flex; align-items:center; gap:3px; font-size:12px; margin-right:8px;">
+            <input type="checkbox" data-role-toggle="${r.id}" ${heldRoleIds.has(r.id) ? 'checked' : ''} /> ${escapeHtml(r.name)}
+          </label>`,
+        )
+        .join('');
+
+      return `
+      <div class="member-row" data-discord-id="${m.user.discordId}" style="flex-wrap:wrap;">
+        <div style="flex:1; min-width:140px;">${escapeHtml(m.user.discordUsername)}</div>
+        <div style="flex-basis:100%; margin:4px 0;">${roleChips}</div>
         <button data-kick>Kick</button>
         <button data-ban>Ban</button>
-      </div>`,
-    )
+      </div>`;
+    })
     .join('');
 
-  document.querySelectorAll('[data-role-select]').forEach((sel) => {
-    sel.addEventListener('change', async () => {
-      const discordId = sel.closest('[data-discord-id]').dataset.discordId;
+  document.querySelectorAll('[data-role-toggle]').forEach((checkbox) => {
+    checkbox.addEventListener('change', async () => {
+      const discordId = checkbox.closest('[data-discord-id]').dataset.discordId;
+      const roleId = checkbox.dataset.roleToggle;
+      const action = checkbox.checked ? 'grant' : 'revoke';
       try {
-        await api(`/api/servers/${serverId}/members/${discordId}/role`, { method: 'POST', body: JSON.stringify({ roleId: sel.value }) });
+        await api(`/api/servers/${serverId}/members/${discordId}/roles/${roleId}/${action}`, { method: 'POST' });
         await load();
       } catch (err) {
+        checkbox.checked = !checkbox.checked; // revert the visual toggle since the change didn't actually apply
         showError(err.message);
       }
     });

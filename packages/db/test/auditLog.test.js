@@ -14,7 +14,7 @@ test('governance actions are recorded in the audit log with the correct actor an
   const { server } = await setupServer(db);
   const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
 
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
   await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', reason: 'spam' });
   await db.unbanMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
   const link = await db.createShareLink({ serverId: server.id, actingDiscordId: 'owner1', accessLevel: 'VIEW' });
@@ -23,7 +23,7 @@ test('governance actions are recorded in the audit log with the correct actor an
   const log = await db.listAuditLog(server.id);
   const actions = log.map((e) => e.action);
 
-  assert.ok(actions.includes('MEMBER_PROMOTED'));
+  assert.ok(actions.includes('ROLE_GRANTED'));
   assert.ok(actions.includes('MEMBER_BANNED'));
   assert.ok(actions.includes('MEMBER_UNBANNED'));
   assert.ok(actions.includes('SHARE_LINK_CREATED'));
@@ -50,7 +50,7 @@ test('routine bug-report status/priority edits are deliberately NOT logged — o
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServer(db);
   const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
 
   const report = await db.createBugReport(server.id, 'tester1', { title: 't', description: 'd', priority: 'LOW', status: 'NEW' });
   await db.updateBugReport({ serverId: server.id, actingDiscordId: 'owner1', bugReportId: report.id, requestedChanges: { status: 'FIXED' } });

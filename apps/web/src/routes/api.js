@@ -18,7 +18,8 @@ const {
   deleteRole,
   listMembers,
   listBannedMembers,
-  promoteMember,
+  grantRole,
+  revokeRole,
   kickMember,
   banMember,
   unbanMember,
@@ -235,16 +236,30 @@ router.get('/api/servers/:serverId/members', async (req, res) => {
   res.json(await listMembers(req.server.id));
 });
 
-router.post('/api/servers/:serverId/members/:discordId/role', async (req, res) => {
+router.post('/api/servers/:serverId/members/:discordId/roles/:roleId/grant', async (req, res) => {
   try {
     res.json(
-      await promoteMember({
+      await grantRole({
         serverId: req.server.id,
         actingDiscordId: req.session.discordId,
         targetDiscordId: req.params.discordId,
-        newRoleId: req.body.roleId,
+        roleId: req.params.roleId,
       }),
     );
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+router.post('/api/servers/:serverId/members/:discordId/roles/:roleId/revoke', async (req, res) => {
+  try {
+    await revokeRole({
+      serverId: req.server.id,
+      actingDiscordId: req.session.discordId,
+      targetDiscordId: req.params.discordId,
+      roleId: req.params.roleId,
+    });
+    res.json({ ok: true });
   } catch (err) {
     res.status(403).json({ error: err.message });
   }

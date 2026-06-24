@@ -100,9 +100,11 @@ test('include resolves belongsTo and hasMany, including nested includes', () => 
   const user = db.user.create({ data: { discordId: 'guest1' } });
   db.guestAccess.create({ data: { shareLinkId: link.id, serverId: server.id, userId: user.id } });
 
-  const membership = db.membership.create({ data: { userId: user.id, serverId: server.id, roleId: role.id } });
-  const withRole = db.membership.findFirst({ where: { id: membership.id }, include: { role: true } });
-  assert.equal(withRole.role.name, 'Owner', 'belongsTo include should attach the related record');
+  const membership = db.membership.create({ data: { userId: user.id, serverId: server.id } });
+  db.memberRole.create({ data: { membershipId: membership.id, roleId: role.id } });
+  const withRoles = db.membership.findFirst({ where: { id: membership.id }, include: { roles: { include: { role: true } } } });
+  assert.equal(withRoles.roles.length, 1, 'hasMany include should attach the joined MemberRole rows');
+  assert.equal(withRoles.roles[0].role.name, 'Owner', 'nested belongsTo include (two levels: membership -> memberRole -> role) should resolve');
 
   const linkWithGuests = db.shareLink.findFirst({ where: { id: link.id }, include: { guestAccess: { include: { user: true } } } });
   assert.equal(linkWithGuests.guestAccess.length, 1);
@@ -133,12 +135,15 @@ test('orderBy: simple field and nested relation field', () => {
   const desc = db.bugReport.findMany({ where: { serverId: 's1' }, orderBy: { createdAt: 'desc' } });
   assert.deepEqual(desc.map((r) => r.title), ['b', 'c', 'a']);
 
+  // MemberRole -> Role is still a direct belongsTo in the multi-role
+  // shape, so it's the natural pairing left to test nested orderBy with.
   const roleLow = db.role.create({ data: { serverId: 's1', name: 'Tester', rank: 10 } });
   const roleHigh = db.role.create({ data: { serverId: 's1', name: 'Owner', rank: 100 } });
-  db.membership.create({ data: { userId: 'u1', serverId: 's1', roleId: roleLow.id } });
-  db.membership.create({ data: { userId: 'u2', serverId: 's1', roleId: roleHigh.id } });
+  const membership = db.membership.create({ data: { userId: 'u1', serverId: 's1' } });
+  db.memberRole.create({ data: { membershipId: membership.id, roleId: roleLow.id } });
+  db.memberRole.create({ data: { membershipId: membership.id, roleId: roleHigh.id } });
 
-  const byRank = db.membership.findMany({ where: { serverId: 's1' }, orderBy: { role: { rank: 'desc' } } });
+  const byRank = db.memberRole.findMany({ where: { membershipId: membership.id }, orderBy: { role: { rank: 'desc' } } });
   assert.equal(byRank[0].roleId, roleHigh.id, 'nested relation orderBy should sort by the related record field');
 });
 

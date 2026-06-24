@@ -13,74 +13,139 @@ async function setupTieredServer(db) {
   const peerRole = await db.createRole({ serverId: server.id, actingDiscordId: 'owner1', name: 'Peer', rank: 50, permissions: {} });
   const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
 
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'dev1', newRoleId: devRole.id });
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'peer1', newRoleId: peerRole.id });
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'dev1', roleId: devRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'peer1', roleId: peerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
 
   return { server, devRole, peerRole, testerRole };
 }
 
-test('promoteMember: cannot touch the role of someone currently ranked higher', async () => {
-  const { db } = loadDbWithFakePrisma();
-  const { server, testerRole } = await setupTieredServer(db);
-  // Dev (rank 50) tries to change Owner's (rank 100) role
-  await assert.rejects(
-    () => db.promoteMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'owner1', newRoleId: testerRole.id }),
-    /server owner|at or above your own rank/,
-  );
-});
+// ---- grantRole ----
 
-test('promoteMember: cannot touch a peer at exactly the same rank', async () => {
+test('grantRole: cannot grant a role at or above your own (effective) rank', async () => {
   const { db } = loadDbWithFakePrisma();
-  const { server, testerRole } = await setupTieredServer(db);
-  // dev1 and peer1 are both rank 50
+  const { server, devRole, testerRole } = await setupTieredServer(db);
   await assert.rejects(
-    () => db.promoteMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'peer1', newRoleId: testerRole.id }),
+    () => db.grantRole({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1', roleId: devRole.id }),
+    /at or above your own rank/,
+  );
+  // Dev (rank 50) also can't grant the Peer role (also rank 50)
+  const peerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Peer');
+  await assert.rejects(
+    () => db.grantRole({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1', roleId: peerRole.id }),
     /at or above your own rank/,
   );
 });
 
-test('promoteMember: cannot hand out a role at or above your own rank, even to someone clearly beneath you', async () => {
-  const { db } = loadDbWithFakePrisma();
-  const { server, devRole } = await setupTieredServer(db);
-  // dev1 (rank 50) tries to promote tester1 (rank 10) to dev1's own role (rank 50)
-  await assert.rejects(
-    () => db.promoteMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1', newRoleId: devRole.id }),
-    /your own rank or above/,
-  );
-});
-
-test('promoteMember: cannot ever change the recorded server owner\'s role, regardless of rank math', async () => {
+test('grantRole: the Discord-style case — a Dev can give the Tester tag to someone who ALSO holds Owner, without touching their Owner role at all', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server, testerRole } = await setupTieredServer(db);
-  await assert.rejects(
-    () => db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'owner1', newRoleId: testerRole.id }),
-    /server owner/,
-  );
+
+  // owner1 already holds Owner (rank 100) from auto-claim. dev1 (rank 50)
+  // grants them the Tester role (rank 10) too — should succeed, since the
+  // check is about the role being granted (10 < 50), not about what else
+  // owner1 holds.
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'owner1', roleId: testerRole.id });
+
+  const membership = await db.getMembership(server.id, 'owner1');
+  const roleNames = membership.roles.map((mr) => mr.role.name).sort();
+  assert.deepEqual(roleNames, ['Owner', 'Tester'], 'owner1 should now hold BOTH roles, not have Owner replaced');
 });
 
-test('promoteMember: succeeds for a genuinely lower-rank target getting a genuinely lower-rank role', async () => {
-  const { db } = loadDbWithFakePrisma();
-  const { server, testerRole } = await setupTieredServer(db);
-  const newLowRole = await db.createRole({ serverId: server.id, actingDiscordId: 'owner1', name: 'Junior', rank: 5, permissions: {} });
-  const result = await db.promoteMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1', newRoleId: newLowRole.id });
-  assert.equal(result.roleId, newLowRole.id);
-});
-
-test('promoteMember: refuses to promote a banned person until they are unbanned', async () => {
+test('grantRole: refuses to grant to a banned person until they are unbanned', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server, testerRole } = await setupTieredServer(db);
   await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
 
   await assert.rejects(
-    () => db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id }),
+    () => db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id }),
     /banned/,
   );
 
   await db.unbanMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
-  const result = await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
-  assert.ok(result, 'should succeed once unbanned');
+  await assert.doesNotReject(() => db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id }));
 });
+
+test('grantRole: granting a role you already hold is a harmless no-op, not a duplicate', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server, testerRole } = await setupTieredServer(db);
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  const membership = await db.getMembership(server.id, 'tester1');
+  assert.equal(membership.roles.length, 1);
+});
+
+test('grantRole: works for a brand-new person who has no membership at all yet', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server, testerRole } = await setupTieredServer(db);
+  await db.verifyUser({ discordId: 'brandnew', discordUsername: 'BrandNew' });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'brandnew', roleId: testerRole.id });
+  const membership = await db.getMembership(server.id, 'brandnew');
+  assert.equal(membership.roles[0].role.name, 'Tester');
+});
+
+// ---- revokeRole ----
+
+test('revokeRole: cannot revoke a role at or above your own rank', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server, devRole } = await setupTieredServer(db);
+  const peerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Peer');
+  await assert.rejects(
+    () => db.revokeRole({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'peer1', roleId: peerRole.id }),
+    /at or above your own rank/,
+    'a Dev cannot revoke the Peer role (same rank as Dev) from anyone, even though dev1 is just acting on peer1',
+  );
+});
+
+test('grantRole: the rank ceiling alone makes the Owner role itself untouchable by anyone below rank 100 — no separate owner-check needed', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupTieredServer(db);
+  const ownerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Owner');
+  await assert.rejects(
+    () => db.grantRole({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1', roleId: ownerRole.id }),
+    /at or above your own rank/,
+  );
+});
+
+test('revokeRole: even the owner cannot self-revoke their own Owner role via this path (rank check uses >=, not >) — that path is transferOwnership instead', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupTieredServer(db);
+  const ownerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Owner');
+  await assert.rejects(
+    () => db.revokeRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'owner1', roleId: ownerRole.id }),
+    /at or above your own rank/,
+  );
+});
+
+test('revokeRole: the Discord-style case — a Dev can take away the Tester tag from someone who also holds Owner, without touching their Owner role', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server, testerRole } = await setupTieredServer(db);
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'owner1', roleId: testerRole.id });
+
+  await db.revokeRole({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'owner1', roleId: testerRole.id });
+
+  const membership = await db.getMembership(server.id, 'owner1');
+  const roleNames = membership.roles.map((mr) => mr.role.name);
+  assert.deepEqual(roleNames, ['Owner'], 'Owner role must remain untouched after the Tester tag is removed');
+});
+
+test('revokeRole: revoking someone\'s last role cleans up their membership entirely', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server, testerRole } = await setupTieredServer(db);
+  await db.revokeRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  const membership = await db.getMembership(server.id, 'tester1');
+  assert.equal(membership, null, 'holding zero roles should mean no membership row at all');
+});
+
+test('revokeRole: throws clearly if the person does not actually hold that role', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server, testerRole } = await setupTieredServer(db);
+  await assert.rejects(
+    () => db.revokeRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'dev1', roleId: testerRole.id }),
+    /does not hold this role/,
+  );
+});
+
+// ---- createRole / updateRolePermissions / deleteRole (rank ceilings + naming) ----
 
 test('createRole: cannot create a role at or above your own rank', async () => {
   const { db } = loadDbWithFakePrisma();
@@ -106,6 +171,13 @@ test('updateRolePermissions: cannot edit a role at or above your own rank, nor r
     /own rank/,
     'raising a lower role up to your own rank should be blocked even though editing it is otherwise fine',
   );
+});
+
+test('updateRolePermissions: rank can be edited (lowered or raised, as long as it stays below your own rank) — this is the "edit rank" capability', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server, testerRole } = await setupTieredServer(db);
+  const updated = await db.updateRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', roleId: testerRole.id, permissions: { rank: 20 } });
+  assert.equal(updated.rank, 20);
 });
 
 test('createRole rejects a name that already exists in this server, with a friendly message instead of a raw database error', async () => {

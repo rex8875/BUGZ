@@ -109,16 +109,25 @@ async function verifyUser({ discordId, discordUsername }) {
   return user;
 }
 
-// Finds this server's Owner role and grants it to a user, creating or
-// updating their membership. Used both when an owner first verifies
-// and when ownership is transferred.
+// Finds this server's Owner role and adds it to a user's held roles,
+// creating their membership if they don't have one yet. ADDS — it
+// never removes whatever else they already hold, same as Discord's own
+// role model. Used both when an owner first verifies and when
+// ownership is transferred.
 async function assignOwnerRole(serverId, userId) {
   const ownerRole = await prisma.role.findFirst({ where: { serverId, name: 'Owner' } });
   if (!ownerRole) throw new Error('Server has no Owner role configured.');
-  return prisma.membership.upsert({
+
+  const membership = await prisma.membership.upsert({
     where: { userId_serverId: { userId, serverId } },
-    update: { roleId: ownerRole.id },
-    create: { userId, serverId, roleId: ownerRole.id },
+    update: {},
+    create: { userId, serverId },
+  });
+
+  return prisma.memberRole.upsert({
+    where: { membershipId_roleId: { membershipId: membership.id, roleId: ownerRole.id } },
+    update: {},
+    create: { membershipId: membership.id, roleId: ownerRole.id },
   });
 }
 
@@ -146,39 +155,55 @@ async function transferOwnership({ serverId, actingDiscordId, newOwnerDiscordId 
 
 // ---- Memberships & permissions --------------------------------------
 
+// Includes every role currently held, not just one — membership.roles
+// is an array of MemberRole join rows, each with its .role attached.
 async function getMembership(serverId, discordId) {
   return prisma.membership.findFirst({
     where: { serverId, user: { discordId } },
-    include: { role: true },
+    include: { roles: { include: { role: true } } },
   });
 }
 
-function permissionsFromRole(role) {
+function rolesOf(membership) {
+  return membership.roles.map((mr) => mr.role);
+}
+
+// The highest rank among every role someone holds — this is what
+// "your rank" means for deciding what you're allowed to grant/revoke,
+// and what's too senior for someone else to touch. Matches Discord:
+// your authority comes from your highest role, not your lowest.
+function effectiveRank(roles) {
+  return roles.length === 0 ? 0 : Math.max(...roles.map((r) => r.rank));
+}
+
+// Permissions are the OR across every role held — if any one role you
+// have grants canManageBugs, you have canManageBugs, full stop.
+function permissionsFromRoles(roles) {
+  const any = (key) => roles.some((r) => r[key]);
+
   // canViewDashboard is the gate every other dashboard permission sits
   // behind. Granting e.g. canManageBugs without it would silently do
   // nothing — easy to do by accident when setting up a custom role — so
-  // any other dashboard power implies view access too. This only affects
-  // the computed permission shape, not the stored role.canViewDashboard
-  // value itself.
+  // any other dashboard power implies view access too.
   const impliesView =
-    role.canManageBugs || role.canPingTesters || role.canArchive || role.canEditReports ||
-    role.canDeleteReports || role.canShareDashboard || role.canKickMembers || role.canBanMembers ||
-    role.canManageRoles || role.canManageSettings;
+    any('canManageBugs') || any('canPingTesters') || any('canArchive') || any('canEditReports') ||
+    any('canDeleteReports') || any('canShareDashboard') || any('canKickMembers') || any('canBanMembers') ||
+    any('canManageRoles') || any('canManageSettings');
 
   return {
     source: 'member',
-    canSubmitBugs: role.canSubmitBugs,
-    canViewDashboard: role.canViewDashboard || impliesView,
-    canManageBugs: role.canManageBugs,
-    canPingTesters: role.canPingTesters,
-    canArchive: role.canArchive,
-    canEditReports: role.canEditReports,
-    canDeleteReports: role.canDeleteReports,
-    canShareDashboard: role.canShareDashboard,
-    canKickMembers: role.canKickMembers,
-    canBanMembers: role.canBanMembers,
-    canManageRoles: role.canManageRoles,
-    canManageSettings: role.canManageSettings,
+    canSubmitBugs: any('canSubmitBugs'),
+    canViewDashboard: any('canViewDashboard') || impliesView,
+    canManageBugs: any('canManageBugs'),
+    canPingTesters: any('canPingTesters'),
+    canArchive: any('canArchive'),
+    canEditReports: any('canEditReports'),
+    canDeleteReports: any('canDeleteReports'),
+    canShareDashboard: any('canShareDashboard'),
+    canKickMembers: any('canKickMembers'),
+    canBanMembers: any('canBanMembers'),
+    canManageRoles: any('canManageRoles'),
+    canManageSettings: any('canManageSettings'),
   };
 }
 
@@ -211,7 +236,7 @@ function permissionsFromShareLink(shareLink) {
 // which path the access came from.
 async function getEffectivePermissions(serverId, discordId) {
   const membership = await getMembership(serverId, discordId);
-  if (membership) return permissionsFromRole(membership.role);
+  if (membership) return permissionsFromRoles(rolesOf(membership));
 
   const user = await prisma.user.findUnique({ where: { discordId } });
   if (!user) return null;
@@ -233,7 +258,7 @@ async function listAccessibleServers(discordId) {
 
   const memberships = await prisma.membership.findMany({
     where: { userId: user.id },
-    include: { server: true, role: true },
+    include: { server: true, roles: { include: { role: true } } },
   });
 
   const guestAccesses = await prisma.guestAccess.findMany({
@@ -242,39 +267,34 @@ async function listAccessibleServers(discordId) {
   });
 
   return [
-    ...memberships.map((m) => ({ server: m.server, permissions: permissionsFromRole(m.role) })),
+    ...memberships.map((m) => ({ server: m.server, permissions: permissionsFromRoles(rolesOf(m)) })),
     ...guestAccesses.map((g) => ({ server: g.server, permissions: permissionsFromShareLink(g.shareLink) })),
   ];
 }
 
-// actingDiscordId must have canManageRoles, and can only act on someone
-// strictly below their own rank — both checked: the target's CURRENT
-// rank (can't touch a peer or superior's role at all) and the new
-// role's rank (can't hand out your own rank or above).
-async function promoteMember({ serverId, actingDiscordId, targetDiscordId, newRoleId }) {
+// Adds a role to whatever someone already holds — does not replace or
+// touch their other roles, exactly like Discord: a Dev can hand the
+// Tester tag to someone who also holds Owner, without that grant
+// affecting their Owner role at all. The check is purely about the role
+// being granted, not about what else the target holds.
+async function grantRole({ serverId, actingDiscordId, targetDiscordId, roleId }) {
   const acting = await getMembership(serverId, actingDiscordId);
-  if (!acting || !acting.role.canManageRoles) {
-    throw new Error('Not permitted to manage roles in this server.');
-  }
+  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
 
   if (await isBanned(serverId, targetDiscordId)) {
     throw new Error('That person is banned from this server — unban them first.');
   }
 
-  const server = await prisma.server.findUnique({ where: { id: serverId } });
-  if (server.ownerDiscordId === targetDiscordId) {
-    throw new Error("Cannot change the server owner's role — transfer ownership first.");
-  }
-
-  const currentMembership = await getMembership(serverId, targetDiscordId);
-  if (currentMembership && currentMembership.role.rank >= acting.role.rank) {
-    throw new Error('Cannot change the role of someone at or above your own rank.');
-  }
-
-  const newRole = await prisma.role.findFirst({ where: { id: newRoleId, serverId } });
-  if (!newRole) throw new Error('That role does not belong to this server.');
-  if (newRole.rank >= acting.role.rank) {
-    throw new Error('Cannot promote someone to your own rank or above.');
+  // No separate "can't touch the owner" rule needed here — the rank
+  // check below already makes the Owner role itself untouchable by
+  // anyone who doesn't already hold rank 100, which is the actual
+  // protection. A lower role (e.g. Tester) can still be freely granted
+  // to the owner without affecting their Owner role at all.
+  const role = await prisma.role.findFirst({ where: { id: roleId, serverId } });
+  if (!role) throw new Error('That role does not belong to this server.');
+  if (role.rank >= effectiveRank(rolesOf(acting))) {
+    throw new Error('Cannot grant a role at or above your own rank.');
   }
 
   const targetUser = await prisma.user.findUnique({ where: { discordId: targetDiscordId } });
@@ -282,32 +302,75 @@ async function promoteMember({ serverId, actingDiscordId, targetDiscordId, newRo
 
   const membership = await prisma.membership.upsert({
     where: { userId_serverId: { userId: targetUser.id, serverId } },
-    update: { roleId: newRole.id },
-    create: { userId: targetUser.id, serverId, roleId: newRole.id },
+    update: {},
+    create: { userId: targetUser.id, serverId },
   });
 
-  await logAction(serverId, actingDiscordId, 'MEMBER_PROMOTED', { target: targetDiscordId, role: newRole.name });
-  return membership;
+  await prisma.memberRole.upsert({
+    where: { membershipId_roleId: { membershipId: membership.id, roleId: role.id } },
+    update: {},
+    create: { membershipId: membership.id, roleId: role.id },
+  });
+
+  await logAction(serverId, actingDiscordId, 'ROLE_GRANTED', { target: targetDiscordId, role: role.name });
+  return getMembership(serverId, targetDiscordId);
 }
 
-// Every member currently in this server, for the roles/members page.
+// Removes one specific role, leaving everything else the target holds
+// untouched. If that was their last role, the membership itself is
+// cleaned up too — holding zero roles isn't meaningfully "being a
+// member" of anything.
+async function revokeRole({ serverId, actingDiscordId, targetDiscordId, roleId }) {
+  const acting = await getMembership(serverId, actingDiscordId);
+  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
+
+  // Same reasoning as grantRole: the rank check below already makes the
+  // Owner role itself untouchable by anyone who doesn't hold rank 100
+  // (including the owner trying to self-revoke it, since the check uses
+  // >=) — that's the real protection. A lower role can still be freely
+  // revoked from the owner without affecting their Owner role.
+  const role = await prisma.role.findFirst({ where: { id: roleId, serverId } });
+  if (!role) throw new Error('That role does not belong to this server.');
+  if (role.rank >= effectiveRank(rolesOf(acting))) {
+    throw new Error('Cannot revoke a role at or above your own rank.');
+  }
+
+  const target = await getMembership(serverId, targetDiscordId);
+  if (!target || !target.roles.some((mr) => mr.roleId === roleId)) {
+    throw new Error('That person does not hold this role.');
+  }
+
+  await prisma.memberRole.deleteMany({ where: { membershipId: target.id, roleId } });
+  await logAction(serverId, actingDiscordId, 'ROLE_REVOKED', { target: targetDiscordId, role: role.name });
+
+  const remaining = await prisma.memberRole.count({ where: { membershipId: target.id } });
+  if (remaining === 0) {
+    await prisma.membership.deleteMany({ where: { id: target.id } });
+  }
+}
+
+// Every member currently in this server, with all their held roles, for
+// the roles/members page. Sorted by effective (highest) rank — can't
+// express "max across a relation" as a database orderBy, so sorted here.
 async function listMembers(serverId) {
-  return prisma.membership.findMany({
+  const memberships = await prisma.membership.findMany({
     where: { serverId },
-    include: { user: true, role: true },
-    orderBy: { role: { rank: 'desc' } },
+    include: { user: true, roles: { include: { role: true } } },
   });
+  return memberships.sort((a, b) => effectiveRank(rolesOf(b)) - effectiveRank(rolesOf(a)));
 }
 
 async function listBannedMembers(serverId) {
   return prisma.bannedMember.findMany({ where: { serverId }, orderBy: { bannedAt: 'desc' } });
 }
 
-// Removes someone's membership without a permanent ban — they could be
-// re-promoted later without anyone needing to unban them first.
+// Removes ALL of someone's roles without a permanent ban — they could
+// be re-added later without anyone needing to unban them first.
 async function kickMember({ serverId, actingDiscordId, targetDiscordId }) {
   const acting = await getMembership(serverId, actingDiscordId);
-  if (!acting?.role.canKickMembers) throw new Error('Not permitted to kick members in this server.');
+  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  if (!actingPerms?.canKickMembers) throw new Error('Not permitted to kick members in this server.');
 
   const server = await prisma.server.findUnique({ where: { id: serverId } });
   if (server.ownerDiscordId === targetDiscordId) {
@@ -315,11 +378,14 @@ async function kickMember({ serverId, actingDiscordId, targetDiscordId }) {
   }
 
   const target = await getMembership(serverId, targetDiscordId);
-  if (target && target.role.rank >= acting.role.rank) {
+  if (target && effectiveRank(rolesOf(target)) >= effectiveRank(rolesOf(acting))) {
     throw new Error('Cannot kick someone at or above your own rank.');
   }
 
-  await prisma.membership.deleteMany({ where: { serverId, user: { discordId: targetDiscordId } } });
+  if (target) {
+    await prisma.memberRole.deleteMany({ where: { membershipId: target.id } });
+    await prisma.membership.deleteMany({ where: { id: target.id } });
+  }
   await logAction(serverId, actingDiscordId, 'MEMBER_KICKED', { target: targetDiscordId });
 }
 
@@ -327,7 +393,8 @@ async function kickMember({ serverId, actingDiscordId, targetDiscordId }) {
 // back until unbanned.
 async function banMember({ serverId, actingDiscordId, targetDiscordId, reason }) {
   const acting = await getMembership(serverId, actingDiscordId);
-  if (!acting?.role.canBanMembers) throw new Error('Not permitted to ban members in this server.');
+  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  if (!actingPerms?.canBanMembers) throw new Error('Not permitted to ban members in this server.');
 
   const server = await prisma.server.findUnique({ where: { id: serverId } });
   if (server.ownerDiscordId === targetDiscordId) {
@@ -335,11 +402,14 @@ async function banMember({ serverId, actingDiscordId, targetDiscordId, reason })
   }
 
   const target = await getMembership(serverId, targetDiscordId);
-  if (target && target.role.rank >= acting.role.rank) {
+  if (target && effectiveRank(rolesOf(target)) >= effectiveRank(rolesOf(acting))) {
     throw new Error('Cannot ban someone at or above your own rank.');
   }
 
-  await prisma.membership.deleteMany({ where: { serverId, user: { discordId: targetDiscordId } } });
+  if (target) {
+    await prisma.memberRole.deleteMany({ where: { membershipId: target.id } });
+    await prisma.membership.deleteMany({ where: { id: target.id } });
+  }
   await prisma.bannedMember.upsert({
     where: { serverId_discordId: { serverId, discordId: targetDiscordId } },
     update: { reason, bannedByDiscordId: actingDiscordId, bannedAt: new Date() },
@@ -350,7 +420,8 @@ async function banMember({ serverId, actingDiscordId, targetDiscordId, reason })
 
 async function unbanMember({ serverId, actingDiscordId, targetDiscordId }) {
   const acting = await getMembership(serverId, actingDiscordId);
-  if (!acting?.role.canBanMembers) throw new Error('Not permitted to unban members in this server.');
+  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  if (!actingPerms?.canBanMembers) throw new Error('Not permitted to unban members in this server.');
 
   await prisma.bannedMember.deleteMany({ where: { serverId, discordId: targetDiscordId } });
   await logAction(serverId, actingDiscordId, 'MEMBER_UNBANNED', { target: targetDiscordId });
@@ -363,11 +434,12 @@ async function listRoles(serverId) {
 }
 
 // Can only create a role at a rank strictly below your own — same
-// ceiling logic as promoting, applied to minting the role itself.
+// ceiling logic as granting, applied to minting the role itself.
 async function createRole({ serverId, actingDiscordId, name, rank, permissions = {} }) {
   const acting = await getMembership(serverId, actingDiscordId);
-  if (!acting?.role.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
-  if (rank >= acting.role.rank) throw new Error('Cannot create a role at or above your own rank.');
+  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
+  if (rank >= effectiveRank(rolesOf(acting))) throw new Error('Cannot create a role at or above your own rank.');
 
   const existing = await prisma.role.findFirst({ where: { serverId, name } });
   if (existing) throw new Error(`A role named "${name}" already exists in this server.`);
@@ -379,12 +451,14 @@ async function createRole({ serverId, actingDiscordId, name, rank, permissions =
 
 async function updateRolePermissions({ serverId, actingDiscordId, roleId, permissions }) {
   const acting = await getMembership(serverId, actingDiscordId);
-  if (!acting?.role.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
+  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
+  const actingRank = effectiveRank(rolesOf(acting));
 
   const target = await prisma.role.findFirst({ where: { id: roleId, serverId } });
   if (!target) throw new Error('That role does not belong to this server.');
-  if (target.rank >= acting.role.rank) throw new Error('Cannot edit a role at or above your own rank.');
-  if (permissions.rank !== undefined && permissions.rank >= acting.role.rank) {
+  if (target.rank >= actingRank) throw new Error('Cannot edit a role at or above your own rank.');
+  if (permissions.rank !== undefined && permissions.rank >= actingRank) {
     throw new Error('Cannot raise a role to your own rank or above.');
   }
   if (permissions.name !== undefined && permissions.name !== target.name) {
@@ -399,13 +473,14 @@ async function updateRolePermissions({ serverId, actingDiscordId, roleId, permis
 
 async function deleteRole({ serverId, actingDiscordId, roleId }) {
   const acting = await getMembership(serverId, actingDiscordId);
-  if (!acting?.role.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
+  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
 
   const target = await prisma.role.findFirst({ where: { id: roleId, serverId } });
   if (!target) throw new Error('That role does not belong to this server.');
-  if (target.rank >= acting.role.rank) throw new Error('Cannot delete a role at or above your own rank.');
+  if (target.rank >= effectiveRank(rolesOf(acting))) throw new Error('Cannot delete a role at or above your own rank.');
 
-  const inUse = await prisma.membership.count({ where: { roleId } });
+  const inUse = await prisma.memberRole.count({ where: { roleId } });
   if (inUse > 0) throw new Error(`${inUse} member(s) still hold this role — reassign them first.`);
 
   await prisma.role.delete({ where: { id: roleId } });
@@ -542,7 +617,8 @@ async function createBugReport(serverId, reporterDiscordId, data) {
   }
 
   const membership = await getMembership(serverId, reporterDiscordId);
-  if (!membership?.role.canSubmitBugs) {
+  const perms = membership ? permissionsFromRoles(rolesOf(membership)) : null;
+  if (!perms?.canSubmitBugs) {
     throw new Error('You do not have permission to report bugs in this server.');
   }
 
@@ -732,9 +808,13 @@ module.exports = {
   assignOwnerRole,
   transferOwnership,
   getMembership,
+  rolesOf,
+  effectiveRank,
+  permissionsFromRoles,
   getEffectivePermissions,
   listAccessibleServers,
-  promoteMember,
+  grantRole,
+  revokeRole,
   listMembers,
   listBannedMembers,
   kickMember,

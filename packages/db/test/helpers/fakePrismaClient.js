@@ -27,6 +27,7 @@ const AUTO_NOW_ON_CREATE = {
   user: ['createdAt'],
   server: ['createdAt'],
   membership: ['joinedAt'],
+  memberRole: ['grantedAt'],
   bannedMember: ['bannedAt'],
   bugReport: ['createdAt'],
   auditLogEntry: ['createdAt'],
@@ -76,8 +77,16 @@ const SCHEMA = {
     compoundUniques: { userId_serverId: ['userId', 'serverId'] },
     relations: {
       user: { type: 'belongsTo', model: 'user', fk: 'userId' },
-      role: { type: 'belongsTo', model: 'role', fk: 'roleId' },
       server: { type: 'belongsTo', model: 'server', fk: 'serverId' },
+      roles: { type: 'hasMany', model: 'memberRole', fk: 'membershipId' },
+    },
+  },
+  memberRole: {
+    uniques: ['id'],
+    compoundUniques: { membershipId_roleId: ['membershipId', 'roleId'] },
+    relations: {
+      membership: { type: 'belongsTo', model: 'membership', fk: 'membershipId' },
+      role: { type: 'belongsTo', model: 'role', fk: 'roleId' },
     },
   },
   bannedMember: {

@@ -79,8 +79,8 @@ test('listMyBugReports returns only the calling user\'s own reports in this serv
   await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester1' });
   await db.verifyUser({ discordId: 'tester2', discordUsername: 'Tester2' });
   const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester2', newRoleId: testerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester2', roleId: testerRole.id });
 
   await db.createBugReport(server.id, 'tester1', { title: 'mine-1', description: 'd', priority: 'LOW', status: 'NEW' });
   await db.createBugReport(server.id, 'tester2', { title: 'not-mine', description: 'd', priority: 'LOW', status: 'NEW' });

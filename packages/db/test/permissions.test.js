@@ -15,10 +15,10 @@ async function setupServerWithDevAndTester(db) {
     rank: 50,
     permissions: { canSubmitBugs: true, canViewDashboard: true, canManageBugs: true, canPingTesters: true, canArchive: true, canEditReports: true, canDeleteReports: true },
   });
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'dev1', newRoleId: devRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'dev1', roleId: devRole.id });
 
   const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', newRoleId: testerRole.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
 
   return { server, devRole, testerRole };
 }
@@ -101,7 +101,7 @@ test('a custom role granted action permissions but not explicit canViewDashboard
     serverId: server.id, actingDiscordId: 'owner1', name: 'ForgotView', rank: 20,
     permissions: { canManageBugs: true },
   });
-  await db.promoteMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'forgetful-owner-setup', newRoleId: role.id });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'forgetful-owner-setup', roleId: role.id });
 
   const perms = await db.getEffectivePermissions(server.id, 'forgetful-owner-setup');
   assert.equal(perms.canViewDashboard, true, 'canManageBugs without explicit canViewDashboard should not be a dead grant');
@@ -133,7 +133,7 @@ test('Dev (report perms, zero governance perms) is blocked from every governance
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServerWithDevAndTester(db);
 
-  await assert.rejects(() => db.promoteMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1', newRoleId: 'whatever' }));
+  await assert.rejects(() => db.grantRole({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1', roleId: 'whatever' }));
   await assert.rejects(() => db.kickMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1' }));
   await assert.rejects(() => db.banMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1' }));
   await assert.rejects(() => db.createShareLink({ serverId: server.id, actingDiscordId: 'dev1', accessLevel: 'VIEW' }));

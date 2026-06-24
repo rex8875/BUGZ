@@ -32,7 +32,7 @@ test('verifying auto-claims Owner membership if you are the recorded owner of an
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'OwnerName' });
 
   const membership = await db.getMembership(server.id, 'owner1');
-  assert.equal(membership.role.name, 'Owner');
+  assert.equal(membership.roles[0].role.name, 'Owner');
 });
 
 test('verifying does NOT grant Owner to someone who is not the recorded owner', async () => {
@@ -77,7 +77,7 @@ test('successful transfer updates ownerDiscordId and grants the new owner the Ow
   assert.equal(updatedServer.ownerDiscordId, 'newowner');
 
   const newMembership = await db.getMembership(server.id, 'newowner');
-  assert.equal(newMembership.role.name, 'Owner');
+  assert.equal(newMembership.roles[0].role.name, 'Owner');
 });
 
 test('after transfer, the previous owner can no longer transfer ownership again', async () => {

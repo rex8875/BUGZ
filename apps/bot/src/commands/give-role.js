@@ -1,31 +1,31 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getServerByDiscordId, getMembership, promoteMember, listRoles } = require('@bugtracker/db');
+const { getServerByDiscordId, getMembership, grantRole, listRoles, permissionsFromRoles, rolesOf } = require('@bugtracker/db');
 
 module.exports = {
   data: new SlashCommandBuilder()
-    .setName('set-role')
-    .setDescription("Add someone to this server's tester/dev program, or change their role")
-    .addUserOption((opt) => opt.setName('user').setDescription('Who to set the role for').setRequired(true))
+    .setName('give-role')
+    .setDescription("Give someone a role, without affecting any other role they already hold")
+    .addUserOption((opt) => opt.setName('user').setDescription('Who to give the role to').setRequired(true))
     .addStringOption((opt) =>
-      opt.setName('role').setDescription('Which role to give them').setRequired(true).setAutocomplete(true),
+      opt.setName('role').setDescription('Which role to give').setRequired(true).setAutocomplete(true),
     ),
 
   async autocomplete(interaction) {
     const server = await getServerByDiscordId(interaction.guildId);
     if (!server) return interaction.respond([]);
 
-    // Don't leak the role list to people who couldn't use it anyway —
-    // same canManageRoles check the command itself enforces.
+    // Don't leak the role list to people who couldn't use it anyway.
     const acting = await getMembership(server.id, interaction.user.id);
-    if (!acting?.role.canManageRoles) return interaction.respond([]);
+    const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+    if (!actingPerms?.canManageRoles) return interaction.respond([]);
 
+    const actingRank = Math.max(0, ...rolesOf(acting).map((r) => r.rank));
     const focused = interaction.options.getFocused().toLowerCase();
     const roles = await listRoles(server.id);
     const matches = roles
       // Only show roles they could actually grant — same rank ceiling
-      // promoteMember enforces, so the list itself doesn't invite a
-      // failed attempt.
-      .filter((r) => r.rank < acting.role.rank)
+      // grantRole enforces, so the list itself doesn't invite a failed attempt.
+      .filter((r) => r.rank < actingRank)
       .filter((r) => r.name.toLowerCase().includes(focused))
       .slice(0, 25)
       .map((r) => ({ name: `${r.name} (rank ${r.rank})`, value: r.id }));
@@ -41,13 +41,13 @@ module.exports = {
     const roleId = interaction.options.getString('role');
 
     try {
-      await promoteMember({
+      await grantRole({
         serverId: server.id,
         actingDiscordId: interaction.user.id,
         targetDiscordId: targetUser.id,
-        newRoleId: roleId,
+        roleId,
       });
-      await interaction.reply({ content: `Done — ${targetUser.username} is set.`, ephemeral: true });
+      await interaction.reply({ content: `Done — gave ${targetUser.username} that role.`, ephemeral: true });
     } catch (err) {
       await interaction.reply({ content: err.message, ephemeral: true });
     }
