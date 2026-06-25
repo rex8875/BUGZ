@@ -1,5 +1,5 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { getUserByDiscordId, getServerByDiscordId, getMembership, createBugReport } = require('@bugtracker/db');
+const { getUserByDiscordId, getServerByDiscordId, getMembership, createBugReport, permissionsFromRoles, rolesOf } = require('@bugtracker/db');
 const { buildCoreModal, buildEvidenceModal } = require('../lib/bugReportModals');
 const { saveDraft, getDraft, clearDraft } = require('../lib/bugReportDrafts');
 
@@ -55,7 +55,8 @@ module.exports = {
 
         const server = await getServerByDiscordId(interaction.guildId);
         const membership = server ? await getMembership(server.id, interaction.user.id) : null;
-        if (!membership?.role.canSubmitBugs) {
+        const perms = membership ? permissionsFromRoles(rolesOf(membership)) : null;
+        if (!perms?.canSubmitBugs) {
           return interaction.reply({
             content: "You don't have permission to report bugs in this server.",
             ephemeral: true,
