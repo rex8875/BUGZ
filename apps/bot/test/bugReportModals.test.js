@@ -2,16 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildCoreModal, buildEvidenceModal } = require('../src/lib/bugReportModals');
 
-const DISCORD_MODAL_COMPONENT_LIMIT = 5;
-
 test('the core bug report modal has exactly 5 top-level components, at Discord\'s limit', () => {
   const modal = buildCoreModal().toJSON();
-  assert.equal(modal.components.length, DISCORD_MODAL_COMPONENT_LIMIT);
+  assert.equal(modal.components.length, 5);
 });
 
-test('the evidence modal also has exactly 5 top-level components', () => {
+test('the evidence modal has 3 components, well under Discord\'s 5-component limit', () => {
   const modal = buildEvidenceModal().toJSON();
-  assert.equal(modal.components.length, DISCORD_MODAL_COMPONENT_LIMIT);
+  assert.equal(modal.components.length, 3);
 });
 
 test('core modal carries title, description, steps, device, and priority fields', () => {
@@ -20,21 +18,24 @@ test('core modal carries title, description, steps, device, and priority fields'
   assert.deepEqual(new Set(customIds), new Set(['title', 'description', 'steps', 'device', 'priority']));
 });
 
-test('evidence modal carries both upload and link options for evidence and F9, plus additional info', () => {
+test('evidence modal is link-only — file upload was dropped as an unreliable, very new Discord feature', () => {
   const modal = buildEvidenceModal().toJSON();
   const customIds = modal.components.map((c) => c.component.custom_id);
-  assert.deepEqual(
-    new Set(customIds),
-    new Set(['evidenceFile', 'evidenceLink', 'f9File', 'f9Link', 'additionalInfo']),
-  );
+  assert.deepEqual(new Set(customIds), new Set(['evidenceLink', 'f9Link', 'additionalInfo']));
 });
 
-test('evidence upload and link fields are both optional at the Discord level (validated as "at least one" in the bot logic instead)', () => {
+test('evidence and F9 links are required, since there is no upload fallback anymore', () => {
   const modal = buildEvidenceModal().toJSON();
-  const evidenceFile = modal.components.find((c) => c.component.custom_id === 'evidenceFile');
   const evidenceLink = modal.components.find((c) => c.component.custom_id === 'evidenceLink');
-  assert.equal(evidenceFile.component.required, false);
-  assert.equal(evidenceLink.component.required, false);
+  const f9Link = modal.components.find((c) => c.component.custom_id === 'f9Link');
+  assert.equal(evidenceLink.component.required, true);
+  assert.equal(f9Link.component.required, true);
+});
+
+test('additional info stays optional', () => {
+  const modal = buildEvidenceModal().toJSON();
+  const additionalInfo = modal.components.find((c) => c.component.custom_id === 'additionalInfo');
+  assert.equal(additionalInfo.component.required, false);
 });
 
 test('title, description, device, and priority are required in the core modal', () => {

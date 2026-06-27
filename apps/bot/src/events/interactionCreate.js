@@ -8,11 +8,6 @@ function continueButtonRow() {
   return [new ActionRowBuilder().addComponents(button)];
 }
 
-function retryButtonRow() {
-  const button = new ButtonBuilder().setCustomId('retry_bug_report_modal2').setLabel('Try again').setStyle(ButtonStyle.Primary);
-  return [new ActionRowBuilder().addComponents(button)];
-}
-
 module.exports = {
   name: 'interactionCreate',
   async execute(interaction) {
@@ -99,32 +94,17 @@ module.exports = {
           });
         }
 
-        const evidenceFiles = interaction.fields.getUploadedFiles('evidenceFile');
         const evidenceLink = interaction.fields.getTextInputValue('evidenceLink');
-        const f9Files = interaction.fields.getUploadedFiles('f9File');
         const f9Link = interaction.fields.getTextInputValue('f9Link');
         const additionalInfo = interaction.fields.getTextInputValue('additionalInfo') || null;
-
-        const hasEvidence = (evidenceFiles && evidenceFiles.length > 0) || evidenceLink;
-        const hasF9 = (f9Files && f9Files.length > 0) || f9Link;
-
-        if (!hasEvidence || !hasF9) {
-          return interaction.reply({
-            content: 'Evidence and F9 each need either an uploaded file or a link — at least one of the two, for both.',
-            components: retryButtonRow(),
-            ephemeral: true,
-          });
-        }
 
         const server = await getServerByDiscordId(interaction.guildId);
 
         try {
           await createBugReport(server.id, interaction.user.id, {
             ...draft,
-            evidenceFileUrl: evidenceFiles?.[0]?.url ?? null,
-            evidenceLink: evidenceLink || null,
-            f9FileUrl: f9Files?.[0]?.url ?? null,
-            f9Link: f9Link || null,
+            evidenceLink,
+            f9Link,
             additionalInfo,
           });
         } catch (err) {

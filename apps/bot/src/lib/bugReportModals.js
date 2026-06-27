@@ -5,7 +5,6 @@ const {
   TextInputStyle,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
-  FileUploadBuilder,
 } = require('discord.js');
 
 function buildCoreModal() {
@@ -63,32 +62,22 @@ function buildCoreModal() {
 }
 
 function buildEvidenceModal() {
-  const evidenceFile = new LabelBuilder()
-    .setLabel('Evidence (upload)')
-    .setDescription('Optional if you provide a link below')
-    .setFileUploadComponent(
-      new FileUploadBuilder().setCustomId('evidenceFile').setMinValues(0).setMaxValues(1).setRequired(false),
-    );
-
+  // File-upload-in-modal is a very new Discord feature with documented
+  // rough edges (a discord.js typing/runtime mismatch around modal
+  // attachments was only fixed in 14.25.1). Link-only is simpler and
+  // was already proven working end to end, so that's the only path now.
   const evidenceLink = new LabelBuilder()
     .setLabel('Evidence link')
-    .setDescription('Medal, Drive, Streamable, etc. Optional if you uploaded a file above')
+    .setDescription('Medal, Drive, Streamable, catbox, etc.')
     .setTextInputComponent(
-      new TextInputBuilder().setCustomId('evidenceLink').setStyle(TextInputStyle.Short).setRequired(false),
-    );
-
-  const f9File = new LabelBuilder()
-    .setLabel('F9 (upload)')
-    .setDescription('Optional if you provide a link below')
-    .setFileUploadComponent(
-      new FileUploadBuilder().setCustomId('f9File').setMinValues(0).setMaxValues(1).setRequired(false),
+      new TextInputBuilder().setCustomId('evidenceLink').setStyle(TextInputStyle.Short).setRequired(true),
     );
 
   const f9Link = new LabelBuilder()
     .setLabel('F9 link')
-    .setDescription('Medal, Drive, Streamable, etc. Optional if you uploaded a file above')
+    .setDescription('Medal, Drive, Streamable, catbox, etc.')
     .setTextInputComponent(
-      new TextInputBuilder().setCustomId('f9Link').setStyle(TextInputStyle.Short).setRequired(false),
+      new TextInputBuilder().setCustomId('f9Link').setStyle(TextInputStyle.Short).setRequired(true),
     );
 
   const additionalInfo = new LabelBuilder()
@@ -101,7 +90,7 @@ function buildEvidenceModal() {
   return new ModalBuilder()
     .setCustomId('bugReportModal2')
     .setTitle('Report a bug (2 of 2)')
-    .addLabelComponents(evidenceFile, evidenceLink, f9File, f9Link, additionalInfo);
+    .addLabelComponents(evidenceLink, f9Link, additionalInfo);
 }
 
 module.exports = { buildCoreModal, buildEvidenceModal };
