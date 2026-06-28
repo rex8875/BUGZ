@@ -69,10 +69,15 @@ async function getServerByDiscordId(discordServerId) {
   return prisma.server.findUnique({ where: { discordServerId } });
 }
 
-async function updateServerSettings({ serverId, actingDiscordId, retestChannelId }) {
+async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId }) {
   const perms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
-  return prisma.server.update({ where: { id: serverId }, data: { retestChannelId } });
+
+  const data = {};
+  if (retestChannelId !== undefined) data.retestChannelId = retestChannelId;
+  if (testerPingRoleId !== undefined) data.testerPingRoleId = testerPingRoleId;
+
+  return prisma.server.update({ where: { id: serverId }, data });
 }
 
 async function getServerById(serverId) {

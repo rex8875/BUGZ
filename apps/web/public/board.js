@@ -12,6 +12,7 @@ const LABELS = {
 const state = {
   permissions: null,
   retestChannelId: null,
+  testerPingRoleId: null,
   reports: [],
   selectedId: null,
   expandedId: null,
@@ -43,6 +44,7 @@ async function load() {
     const me = await api(`/api/servers/${serverId}/me`);
     state.permissions = me.permissions;
     state.retestChannelId = me.retestChannelId;
+    state.testerPingRoleId = me.testerPingRoleId;
     document.getElementById('server-name').textContent = 'Bug dashboard';
     document.getElementById('leaderboard-link').href = `/dashboard/${serverId}/leaderboard`;
     if (state.permissions.canManageSettings || state.permissions.canShareDashboard) {
@@ -300,7 +302,13 @@ async function renderSettings() {
         <input type="text" id="retest-channel-input" value="${escapeHtml(state.retestChannelId || '')}" placeholder="Discord channel ID" />
         <button id="save-channel-btn">Save</button>
       </div>
-    </div>`
+      <div>
+        <label>Tester role ID to ping</label>
+        <input type="text" id="tester-role-input" value="${escapeHtml(state.testerPingRoleId || '')}" placeholder="Discord role ID" />
+        <button id="save-tester-role-btn">Save</button>
+      </div>
+    </div>
+    <div class="hint">Easier to set the role with <code>/set-tester-role</code> in Discord directly — this is a fallback for when you already have the ID.</div>`
         : ''
     }
 
@@ -324,6 +332,18 @@ async function renderSettings() {
           body: JSON.stringify({ retestChannelId: document.getElementById('retest-channel-input').value }),
         });
         state.retestChannelId = document.getElementById('retest-channel-input').value;
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    document.getElementById('save-tester-role-btn').addEventListener('click', async () => {
+      try {
+        await api(`/api/servers/${serverId}/settings`, {
+          method: 'PATCH',
+          body: JSON.stringify({ testerPingRoleId: document.getElementById('tester-role-input').value }),
+        });
+        state.testerPingRoleId = document.getElementById('tester-role-input').value;
       } catch (err) {
         showError(err.message);
       }

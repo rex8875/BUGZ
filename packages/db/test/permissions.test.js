@@ -141,6 +141,21 @@ test('Dev (report perms, zero governance perms) is blocked from every governance
   await assert.rejects(() => db.createRole({ serverId: server.id, actingDiscordId: 'dev1', name: 'New', rank: 5 }));
 });
 
+test('updateServerSettings: updating one setting never touches the other', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServerWithDevAndTester(db);
+
+  await db.updateServerSettings({ serverId: server.id, actingDiscordId: 'owner1', retestChannelId: 'channel-1' });
+  let updated = await db.getServerById(server.id);
+  assert.equal(updated.retestChannelId, 'channel-1');
+  assert.equal(updated.testerPingRoleId ?? null, null, 'should still be unset');
+
+  await db.updateServerSettings({ serverId: server.id, actingDiscordId: 'owner1', testerPingRoleId: 'role-1' });
+  updated = await db.getServerById(server.id);
+  assert.equal(updated.retestChannelId, 'channel-1', 'setting the role must not have wiped the previously-set channel');
+  assert.equal(updated.testerPingRoleId, 'role-1');
+});
+
 test('Dev CAN manage reports, including archiving once the report reaches a terminal status', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServerWithDevAndTester(db);

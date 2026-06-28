@@ -59,7 +59,11 @@ router.get('/api/servers', async (req, res) => {
 });
 
 router.get('/api/servers/:serverId/me', (req, res) => {
-  res.json({ permissions: req.perms, retestChannelId: req.server.retestChannelId });
+  res.json({
+    permissions: req.perms,
+    retestChannelId: req.server.retestChannelId,
+    testerPingRoleId: req.server.testerPingRoleId,
+  });
 });
 
 router.get('/api/servers/:serverId/reports', async (req, res) => {
@@ -110,7 +114,12 @@ async function handleRetestPost(req, res, { ping }) {
   if (!report) return res.status(404).json({ error: 'Report not found.' });
 
   try {
-    const { messageId, threadId } = await postRetestMessage({ channelId: req.server.retestChannelId, report, ping });
+    const { messageId, threadId } = await postRetestMessage({
+      channelId: req.server.retestChannelId,
+      report,
+      ping,
+      testerPingRoleId: req.server.testerPingRoleId,
+    });
     res.json(
       await updateBugReport({
         serverId: req.server.id,
@@ -182,6 +191,7 @@ router.patch('/api/servers/:serverId/settings', async (req, res) => {
         serverId: req.server.id,
         actingDiscordId: req.session.discordId,
         retestChannelId: req.body.retestChannelId,
+        testerPingRoleId: req.body.testerPingRoleId,
       }),
     );
   } catch (err) {

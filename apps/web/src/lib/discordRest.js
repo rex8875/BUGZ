@@ -17,9 +17,11 @@ async function discordRequest(path, options = {}) {
 }
 
 // Posts the bug into the configured retest channel and opens a thread on
-// it for discussion. `ping` controls whether the reporter is mentioned —
-// "Ping testers" vs "Post in retested" are the same call with this flag flipped.
-async function postRetestMessage({ channelId, report, ping }) {
+// it for discussion. `ping` controls whether anyone is mentioned —
+// "Ping testers" vs "Post in retested" are the same call with this flag
+// flipped. Pings the configured tester role if one's set, otherwise
+// falls back to mentioning the individual reporter.
+async function postRetestMessage({ channelId, report, ping, testerPingRoleId }) {
   const embed = {
     title: report.title,
     description: report.description,
@@ -31,11 +33,18 @@ async function postRetestMessage({ channelId, report, ping }) {
     ],
   };
 
+  const mention = testerPingRoleId ? `<@&${testerPingRoleId}>` : `<@${report.reporter.discordId}>`;
+
   const message = await discordRequest(`/channels/${channelId}/messages`, {
     method: 'POST',
     body: JSON.stringify({
-      content: ping ? `<@${report.reporter.discordId}>` : undefined,
+      content: ping ? mention : undefined,
       embeds: [embed],
+      // Discord does NOT actually notify a role by default just because
+      // it's mentioned in the text — that's a deliberate anti-spam
+      // measure, unlike user mentions which ping by default. Without
+      // this, the role tag would render but silently ping no one.
+      allowed_mentions: ping ? { parse: ['users'], roles: testerPingRoleId ? [testerPingRoleId] : [] } : undefined,
     }),
   });
 
