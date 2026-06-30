@@ -34,7 +34,7 @@ async function isBanned(serverId, discordId) {
 async function createServerOnJoin({ discordServerId, name, ownerDiscordId }) {
   return prisma.server.upsert({
     where: { discordServerId },
-    update: { name },
+    update: { name, isActive: true },
     create: {
       discordServerId,
       name,
@@ -67,6 +67,27 @@ async function createServerOnJoin({ discordServerId, name, ownerDiscordId }) {
 
 async function getServerByDiscordId(discordServerId) {
   return prisma.server.findUnique({ where: { discordServerId } });
+}
+
+// Called when the bot is kicked/leaves a Discord server. Doesn't touch
+// any data — just flips the visibility flag, since the bot getting
+// re-invited later (createServerOnJoin) flips it back automatically.
+async function deactivateServer(discordServerId) {
+  await prisma.server.updateMany({ where: { discordServerId }, data: { isActive: false } });
+}
+
+// Called when an individual PERSON leaves the Discord server (not the
+// bot) — removes only their own roles/membership, never touching
+// anyone else's access or the server itself. No permission checks here:
+// this isn't a person-initiated action, it's an automatic reaction to
+// Discord telling us they're gone.
+async function removeMembershipOnLeave(serverId, discordId) {
+  const membership = await getMembership(serverId, discordId);
+  if (!membership) return;
+
+  await prisma.memberRole.deleteMany({ where: { membershipId: membership.id } });
+  await prisma.membership.deleteMany({ where: { id: membership.id } });
+  await logAction(serverId, discordId, 'MEMBER_LEFT_DISCORD', {});
 }
 
 async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId }) {
@@ -240,6 +261,9 @@ function permissionsFromShareLink(shareLink) {
 // way the caller gets the same shape back, so it doesn't need to care
 // which path the access came from.
 async function getEffectivePermissions(serverId, discordId) {
+  const server = await prisma.server.findUnique({ where: { id: serverId } });
+  if (!server || !server.isActive) return null;
+
   const membership = await getMembership(serverId, discordId);
   if (membership) return permissionsFromRoles(rolesOf(membership));
 
@@ -262,12 +286,12 @@ async function listAccessibleServers(discordId) {
   if (!user) return [];
 
   const memberships = await prisma.membership.findMany({
-    where: { userId: user.id },
+    where: { userId: user.id, server: { isActive: true } },
     include: { server: true, roles: { include: { role: true } } },
   });
 
   const guestAccesses = await prisma.guestAccess.findMany({
-    where: { userId: user.id, shareLink: { revokedAt: null } },
+    where: { userId: user.id, shareLink: { revokedAt: null }, server: { isActive: true } },
     include: { server: true, shareLink: true },
   });
 
@@ -806,6 +830,8 @@ module.exports = {
   prisma,
   createServerOnJoin,
   getServerByDiscordId,
+  deactivateServer,
+  removeMembershipOnLeave,
   getServerById,
   updateServerSettings,
   getUserByDiscordId,

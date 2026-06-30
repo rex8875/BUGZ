@@ -49,6 +49,7 @@ const SCHEMA = {
       roles: { type: 'hasMany', model: 'role', fk: 'serverId' },
       memberships: { type: 'hasMany', model: 'membership', fk: 'serverId' },
     },
+    defaults: { isActive: true },
   },
   role: {
     uniques: ['id'],
@@ -119,6 +120,7 @@ const SCHEMA = {
     relations: {
       user: { type: 'belongsTo', model: 'user', fk: 'userId' },
       shareLink: { type: 'belongsTo', model: 'shareLink', fk: 'shareLinkId' },
+      server: { type: 'belongsTo', model: 'server', fk: 'serverId' },
     },
   },
   user: { uniques: ['id', 'discordId'], relations: {} },

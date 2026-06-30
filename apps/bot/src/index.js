@@ -4,7 +4,12 @@ const path = require('path');
 const { Client, GatewayIntentBits, Collection } = require('discord.js');
 const { deleteExpiredArchivedReports } = require('@bugtracker/db');
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// GuildMembers is a PRIVILEGED intent — required for guildMemberRemove
+// (a person leaving) to fire at all. Must also be toggled on in the
+// Discord Developer Portal: Bot tab -> Privileged Gateway Intents ->
+// Server Members Intent. Without that toggle, this intent request gets
+// silently rejected and the bot fails to log in.
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] });
 client.commands = new Collection();
 
 for (const file of fs.readdirSync(path.join(__dirname, 'commands'))) {

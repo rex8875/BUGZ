@@ -295,6 +295,26 @@ test('update() and updateMany() bump @updatedAt-style fields automatically, rega
 });
 
 
+test('server defaults isActive to true, matching @default(true)', () => {
+  const db = createFakePrismaClient();
+  const server = db.server.create({ data: { discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' } });
+  assert.equal(server.isActive, true);
+});
+
+test('belongsTo relation filtering works through different relation names pointing at the same model (membership.server and guestAccess.server)', () => {
+  const db = createFakePrismaClient();
+  const activeServer = db.server.create({ data: { discordServerId: 'gActive', name: 'Active', ownerDiscordId: 'o1' } });
+  const inactiveServer = db.server.create({ data: { discordServerId: 'gInactive', name: 'Inactive', ownerDiscordId: 'o2', isActive: false } });
+
+  db.membership.create({ data: { userId: 'u1', serverId: activeServer.id } });
+  db.membership.create({ data: { userId: 'u1', serverId: inactiveServer.id } });
+
+  const onlyActive = db.membership.findMany({ where: { userId: 'u1', server: { isActive: true } } });
+  assert.equal(onlyActive.length, 1);
+  assert.equal(onlyActive[0].serverId, activeServer.id);
+});
+
+
 test('each createFakePrismaClient() call is fully isolated from previous ones', () => {
   const dbA = createFakePrismaClient();
   dbA.user.create({ data: { discordId: 'only-in-a' } });

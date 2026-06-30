@@ -95,7 +95,42 @@ test('banned user cannot submit a bug report, even if somehow still holding a me
   );
 });
 
+test('kicking a member immediately removes their dashboard access entirely (getEffectivePermissions returns null)', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupTieredServer(db);
+  await db.verifyUser({ discordId: 'devview', discordUsername: 'DevView' });
+  const devRole = await db.createRole({ serverId: server.id, actingDiscordId: 'owner1', name: 'DevView', rank: 20, permissions: { canViewDashboard: true, canManageBugs: true } });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview', roleId: devRole.id });
+  assert.ok(await db.getEffectivePermissions(server.id, 'devview'), 'sanity check before kick');
+
+  await db.kickMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview' });
+
+  assert.equal(await db.getEffectivePermissions(server.id, 'devview'), null, 'kicked member should have zero dashboard access, not just be missing from the member list');
+});
+
+test('banning a member immediately removes their dashboard access, and unbanning alone does NOT restore it (they need a role granted again first)', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupTieredServer(db);
+  await db.verifyUser({ discordId: 'devview2', discordUsername: 'DevView2' });
+  const devRole = await db.createRole({ serverId: server.id, actingDiscordId: 'owner1', name: 'DevView2', rank: 20, permissions: { canViewDashboard: true } });
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview2', roleId: devRole.id });
+
+  await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview2' });
+  assert.equal(await db.getEffectivePermissions(server.id, 'devview2'), null);
+
+  await db.unbanMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview2' });
+  assert.equal(
+    await db.getEffectivePermissions(server.id, 'devview2'),
+    null,
+    'unbanning lifts the block on re-adding them, but does not by itself restore the roles that were stripped on ban',
+  );
+
+  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview2', roleId: devRole.id });
+  assert.ok(await db.getEffectivePermissions(server.id, 'devview2'), 'access resumes once a role is actually granted again post-unban');
+});
+
 test('listBannedMembers and listMembers reflect kicks/bans correctly', async () => {
+
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupTieredServer(db);
   await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', reason: 'spam' });

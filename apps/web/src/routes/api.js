@@ -36,6 +36,10 @@ router.use('/api', requireAuthApi);
 
 // Loads the server + this user's permissions for every /api/servers/:serverId/* route,
 // so each handler below can just check req.perms instead of re-deriving it.
+// Note: getEffectivePermissions itself returns null for an inactive server
+// (bot removed/kicked) regardless of role or guest status, so that case is
+// already covered by the canViewDashboard check below — no separate
+// isActive check needed here.
 router.use('/api/servers/:serverId', async (req, res, next) => {
   const server = await getServerById(req.params.serverId);
   if (!server) return res.status(404).json({ error: 'Server not found.' });

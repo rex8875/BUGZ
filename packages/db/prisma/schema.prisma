@@ -32,6 +32,10 @@ model Server {
   ownerDiscordId  String
   retestChannelId String?
   testerPingRoleId String?
+  // False once the bot is kicked/removed from this Discord server. Data
+  // is kept (reports, roles, members) — only dashboard visibility is
+  // gated on this, so nothing is lost if the bot gets re-invited later.
+  isActive        Boolean      @default(true)
   createdAt       DateTime     @default(now())
   roles           Role[]
   memberships     Membership[]
