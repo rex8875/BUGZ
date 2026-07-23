@@ -21,15 +21,24 @@ async function discordRequest(path, options = {}) {
 // "Ping testers" vs "Post in retested" are the same call with this flag
 // flipped. Pings the configured tester role if one's set, otherwise
 // falls back to mentioning the individual reporter.
-async function postRetestMessage({ channelId, report, ping, testerPingRoleId }) {
+async function postRetestMessage({ channelId, report, ping, testerPingRoleId, triggeredByDiscordId }) {
+  const reportUrl = `${process.env.WEB_BASE_URL}/dashboard/${report.serverId}?report=${report.id}`;
+
   const embed = {
     title: report.title,
+    // Makes the embed title a clickable link straight to a readable view
+    // of this exact report on the dashboard (auto-expands there).
+    url: reportUrl,
     description: report.description,
     color: 0x3ba55d,
     fields: [
       { name: 'Status', value: report.status, inline: true },
       { name: 'Priority', value: report.priority, inline: true },
       { name: 'Device', value: report.device || 'Not specified', inline: true },
+      // Embed fields never trigger a Discord notification/highlight on
+      // their own (only mentions in the top-level `content` do), so this
+      // is safe to include without touching allowed_mentions.
+      { name: 'Triggered by', value: triggeredByDiscordId ? `<@${triggeredByDiscordId}>` : 'Unknown', inline: true },
     ],
   };
 

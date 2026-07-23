@@ -63,12 +63,66 @@ test('postRetestMessage sends no mention at all when ping is false ("Post in ret
   await withMockedFetch([{ id: 'message-1' }, { id: 'thread-1' }], async (calls) => {
     await postRetestMessage({
       channelId: 'chan-1',
-      report: { title: 't', description: 'd', status: 'FIXED', priority: 'HIGH', device: 'PC', reporter: { discordId: 'reporter-1' } },
+      report: { id: 'r0', serverId: 's0', title: 't', description: 'd', status: 'FIXED', priority: 'HIGH', device: 'PC', reporter: { discordId: 'reporter-1' } },
       ping: false,
       testerPingRoleId: 'role-1',
     });
 
     assert.equal(calls[0].body.content, undefined);
     assert.equal(calls[0].body.allowed_mentions, undefined);
+  });
+});
+
+test('postRetestMessage embeds a clickable link to a readable view of the report, and shows who triggered it', async () => {
+  delete require.cache[require.resolve('../src/lib/discordRest')];
+  const { postRetestMessage } = require('../src/lib/discordRest');
+
+  const realBaseUrl = process.env.WEB_BASE_URL;
+  process.env.WEB_BASE_URL = 'https://bugz.example.com';
+  try {
+    await withMockedFetch([{ id: 'message-1' }, { id: 'thread-1' }], async (calls) => {
+      await postRetestMessage({
+        channelId: 'chan-1',
+        report: {
+          id: 'report-42',
+          serverId: 'server-9',
+          title: 'Floor breaks',
+          description: 'd',
+          status: 'FIXED',
+          priority: 'HIGH',
+          device: 'PC',
+          reporter: { discordId: 'reporter-1' },
+        },
+        ping: true,
+        testerPingRoleId: 'role-1',
+        triggeredByDiscordId: 'dev-1',
+      });
+
+      const embed = calls[0].body.embeds[0];
+      assert.equal(embed.url, 'https://bugz.example.com/dashboard/server-9?report=report-42', 'embed title should link to a readable view of this exact report');
+
+      const triggeredByField = embed.fields.find((f) => f.name === 'Triggered by');
+      assert.ok(triggeredByField, 'must include a Triggered by field');
+      assert.equal(triggeredByField.value, '<@dev-1>');
+    });
+  } finally {
+    process.env.WEB_BASE_URL = realBaseUrl;
+  }
+});
+
+test('postRetestMessage shows "Unknown" for Triggered by if somehow not provided, rather than crashing', async () => {
+  delete require.cache[require.resolve('../src/lib/discordRest')];
+  const { postRetestMessage } = require('../src/lib/discordRest');
+
+  await withMockedFetch([{ id: 'message-1' }, { id: 'thread-1' }], async (calls) => {
+    await postRetestMessage({
+      channelId: 'chan-1',
+      report: { id: 'r1', serverId: 's1', title: 't', description: 'd', status: 'FIXED', priority: 'HIGH', device: 'PC', reporter: { discordId: 'reporter-1' } },
+      ping: false,
+      testerPingRoleId: null,
+    });
+
+    const triggeredByField = calls[0].body.embeds[0].fields.find((f) => f.name === 'Triggered by');
+    assert.equal(triggeredByField.value, 'Unknown');
   });
 });

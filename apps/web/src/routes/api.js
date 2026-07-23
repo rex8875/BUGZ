@@ -110,6 +110,12 @@ router.get('/api/servers/:serverId/summary', async (req, res) => {
   res.json(await getReportSummary(req.server.id));
 });
 
+router.get('/api/servers/:serverId/reports/:reportId', async (req, res) => {
+  const report = await getBugReport(req.server.id, req.params.reportId);
+  if (!report) return res.status(404).json({ error: 'Report not found.' });
+  res.json(report);
+});
+
 router.patch('/api/servers/:serverId/reports/:reportId', async (req, res) => {
   try {
     res.json(
@@ -149,6 +155,7 @@ async function handleRetestPost(req, res, { ping }) {
       report,
       ping,
       testerPingRoleId: req.server.testerPingRoleId,
+      triggeredByDiscordId: req.session.discordId,
     });
     res.json(
       await updateBugReport({

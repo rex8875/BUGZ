@@ -16,16 +16,16 @@ function mockFetchSequence(responses) {
 // Loads a real public/*.html + its script(s) into jsdom, with fetch mocked,
 // and lets the script's own async load() function run to completion before
 // handing back the document for assertions.
-async function renderPage({ htmlFile, scripts, fetchImpl }) {
+async function renderPage({ htmlFile, scripts, fetchImpl, url = 'https://example.test/dashboard' }) {
   const html = fs.readFileSync(path.join(__dirname, '../public', htmlFile), 'utf8');
-  const dom = new JSDOM(html, { runScripts: 'outside-only', url: 'https://example.test/dashboard' });
+  const dom = new JSDOM(html, { runScripts: 'outside-only', url });
   dom.window.fetch = fetchImpl;
   for (const script of scripts) {
     const code = fs.readFileSync(path.join(__dirname, '../public', script), 'utf8');
     dom.window.eval(code);
   }
   // Allow any pending microtasks (the async load functions) to flush.
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await new Promise((resolve) => setTimeout(resolve, 60));
   return dom;
 }
 
@@ -101,6 +101,43 @@ test('board.html renders explicitly labeled, colored Priority and Status tags on
   // Server avatar element should exist in the topbar (even with no icon set,
   // it gets replaced with an initials fallback rather than staying broken).
   assert.ok(doc.querySelector('.server-avatar'), 'board topbar should show a server avatar (icon or initials)');
+});
+
+test('board.html opens directly to a specific report when linked via ?report=<id> (the retest message link target)', async () => {
+  const dom = await renderPage({
+    htmlFile: 'board.html',
+    scripts: ['board.js'],
+    url: 'https://example.test/dashboard/server-9?report=deep-linked-report',
+    fetchImpl: async (url) => {
+      if (String(url).includes('/reports/deep-linked-report')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'deep-linked-report', title: 'Deep linked bug', priority: 'HIGH', status: 'NEW',
+            reporter: { discordUsername: 'tester1' }, device: 'PC', createdAt: new Date().toISOString(),
+            evidenceLink: null, f9Link: null,
+          }),
+        };
+      }
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 0 }) };
+      if (String(url).includes('/me')) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'Alpha', iconUrl: null, backgroundStyle: null }),
+        };
+      }
+      // /reports (the general list) — deliberately empty, so this test
+      // proves the deep link works even when the report isn't in the
+      // currently-loaded filtered list (e.g. a different status).
+      return { ok: true, status: 200, json: async () => [] };
+    },
+  });
+  const doc = dom.window.document;
+
+  const detailPanel = doc.querySelector('#detail-area .detail-panel');
+  assert.ok(detailPanel, 'the linked report should open directly in the detail panel on load');
+  assert.match(detailPanel.textContent, /Deep linked bug/);
 });
 
 test('board.html shows the raw evidence/F9 URL as visible text, not a generic "View" link', async () => {

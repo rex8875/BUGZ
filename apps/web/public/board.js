@@ -85,8 +85,31 @@ async function load() {
     }
     await loadSummary();
     await loadReports();
+    await openDeepLinkedReportIfAny();
   } catch (err) {
     showError(err.message);
+  }
+}
+
+// Supports links like /dashboard/:serverId?report=abc123 (used by the
+// "Triggered by" retest messages) — opens straight to that report's
+// detail panel even if it's archived or outside the current filter.
+async function openDeepLinkedReportIfAny() {
+  const reportId = new URLSearchParams(window.location.search).get('report');
+  if (!reportId) return;
+
+  try {
+    const report = await api(`/api/servers/${serverId}/reports/${reportId}`);
+    if (!state.reports.some((r) => r.id === report.id)) {
+      state.reports = [report, ...state.reports];
+    }
+    state.selectedId = report.id;
+    state.expandedId = report.id;
+    renderList();
+    renderDetail();
+    document.getElementById('detail-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (err) {
+    showError(`Couldn't open the linked report: ${err.message}`);
   }
 }
 
