@@ -62,6 +62,17 @@ module.exports = {
       }
 
       if (interaction.customId === 'continue_bug_report_modal2' || interaction.customId === 'retry_bug_report_modal2') {
+        // Guard against a stale click: if the draft is gone (already
+        // submitted, or expired), don't reopen the form — disable the
+        // button in place and tell the person plainly instead.
+        const draft = getDraft(interaction.user.id);
+        if (!draft) {
+          await interaction.update({
+            content: 'This report was already submitted (or the draft expired). Run "Report bug" again to start a new one.',
+            components: [],
+          });
+          return;
+        }
         return interaction.showModal(buildEvidenceModal());
       }
       return;
@@ -88,6 +99,12 @@ module.exports = {
       if (interaction.customId === 'bugReportModal2') {
         const draft = getDraft(interaction.user.id);
         if (!draft) {
+          // The modal was already open when the draft expired/cleared out
+          // from under it. Disable the originating button too, so a second
+          // stale click can't get back in here.
+          if (interaction.message) {
+            await interaction.message.edit({ components: [] }).catch(() => {});
+          }
           return interaction.reply({
             content: 'Your draft expired before you finished. Click "Report bug" again to start over.',
             ephemeral: true,
@@ -108,10 +125,19 @@ module.exports = {
             additionalInfo,
           });
         } catch (err) {
+          // Leave the draft and the Continue button alive on failure
+          // (e.g. validation error) so the person can retry without
+          // re-typing modal 1.
           return interaction.reply({ content: err.message, ephemeral: true });
         }
 
         clearDraft(interaction.user.id);
+
+        // The report is in — disable the Continue button on the modal-1
+        // reply message so a stale click can never reopen this form again.
+        if (interaction.message) {
+          await interaction.message.edit({ content: 'Bug report submitted — thanks!', components: [] }).catch(() => {});
+        }
 
         return interaction.reply({ content: 'Bug report submitted — thanks!', ephemeral: true });
       }
