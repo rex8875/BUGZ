@@ -8,7 +8,10 @@
 <body>
   <div class="container">
     <div class="topbar">
-      <h1 id="server-name">Loading…</h1>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <img id="server-avatar" class="server-avatar" style="display:none;width:38px;height:38px;" alt="" />
+        <h1 id="server-name">Loading…</h1>
+      </div>
       <div>
         <a href="" id="leaderboard-link"><button>Leaderboard</button></a>
         <a href="" id="roles-link" style="display:none;"><button>Roles & members</button></a>
@@ -22,8 +25,8 @@
 
     <div id="settings-panel" class="detail-panel" style="display:none;"></div>
 
-    <div class="filters" id="filters"></div>
-    <div class="filters" id="priority-filters"></div>
+    <div class="filter-group" id="filters"></div>
+    <div class="filter-group" id="priority-filters"></div>
     <div class="report-list" id="report-list">Loading…</div>
     <div id="detail-area"></div>
   </div>

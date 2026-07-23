@@ -32,6 +32,15 @@ model Server {
   ownerDiscordId  String
   retestChannelId String?
   testerPingRoleId String?
+  // Discord guild icon, captured on join/reconciliation — used for the
+  // avatar shown next to the server name on the picker page.
+  iconUrl         String?
+  // A validated CSS background value (hex color or a 2-stop linear
+  // gradient of two hex colors) set per-server from the picker page.
+  // Validated in updateServerAppearance() before it ever reaches here,
+  // since this gets interpolated directly into a style attribute.
+  backgroundStyle String?
+
   // False once the bot is kicked/removed from this Discord server. Data
   // is kept (reports, roles, members) — only dashboard visibility is
   // gated on this, so nothing is lost if the bot gets re-invited later.

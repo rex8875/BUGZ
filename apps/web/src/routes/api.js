@@ -8,6 +8,7 @@ const {
   deleteBugReport,
   getReportSummary,
   updateServerSettings,
+  updateServerAppearance,
   createShareLink,
   revokeShareLink,
   listShareLinks,
@@ -59,7 +60,15 @@ router.get('/api/servers', async (req, res) => {
   // link to servers they can actually view — otherwise this links straight
   // into a 403 on the board page for e.g. a Discord-only Tester.
   const viewable = accessible.filter((a) => a.permissions.canViewDashboard);
-  res.json(viewable.map((a) => ({ id: a.server.id, name: a.server.name, permissions: a.permissions })));
+  res.json(
+    viewable.map((a) => ({
+      id: a.server.id,
+      name: a.server.name,
+      iconUrl: a.server.iconUrl,
+      backgroundStyle: a.server.backgroundStyle,
+      permissions: a.permissions,
+    })),
+  );
 });
 
 router.get('/api/servers/:serverId/me', (req, res) => {
@@ -67,7 +76,24 @@ router.get('/api/servers/:serverId/me', (req, res) => {
     permissions: req.perms,
     retestChannelId: req.server.retestChannelId,
     testerPingRoleId: req.server.testerPingRoleId,
+    serverName: req.server.name,
+    iconUrl: req.server.iconUrl,
+    backgroundStyle: req.server.backgroundStyle,
   });
+});
+
+router.patch('/api/servers/:serverId/appearance', async (req, res) => {
+  try {
+    res.json(
+      await updateServerAppearance({
+        serverId: req.server.id,
+        actingDiscordId: req.session.discordId,
+        backgroundStyle: req.body.backgroundStyle ?? null,
+      }),
+    );
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 router.get('/api/servers/:serverId/reports', async (req, res) => {

@@ -2,17 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Your servers</title>
+  <title>Your servers — Field Log</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div class="container">
     <div class="topbar">
-      <h1>Your servers</h1>
+      <div>
+        <h1>Your Servers</h1>
+        <div class="hint" style="margin-top:2px;">Pick a server to open its bug board.</div>
+      </div>
       <form action="/auth/logout" method="post"><button>Log out</button></form>
     </div>
     <div id="list">Loading…</div>
   </div>
+  <script src="/colorPicker.js"></script>
   <script src="/servers.js"></script>
 </body>
 </html>

@@ -23,6 +23,7 @@ async function registerGuild(guild) {
     discordServerId: guild.id,
     name: guild.name,
     ownerDiscordId,
+    iconUrl: guild.iconURL ? guild.iconURL({ size: 128 }) : null,
   });
 }
 

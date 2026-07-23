@@ -31,14 +31,15 @@ async function isBanned(serverId, discordId) {
 // if this is the first time the bot has seen this guild. ownerDiscordId
 // is whoever the bot could identify as the inviter, falling back to
 // the guild's Discord-owner if the audit log wasn't readable.
-async function createServerOnJoin({ discordServerId, name, ownerDiscordId }) {
+async function createServerOnJoin({ discordServerId, name, ownerDiscordId, iconUrl }) {
   return prisma.server.upsert({
     where: { discordServerId },
-    update: { name, isActive: true },
+    update: { name, isActive: true, ...(iconUrl !== undefined ? { iconUrl } : {}) },
     create: {
       discordServerId,
       name,
       ownerDiscordId,
+      iconUrl: iconUrl || null,
       roles: {
         create: [
           {
@@ -99,6 +100,34 @@ async function updateServerSettings({ serverId, actingDiscordId, retestChannelId
   if (testerPingRoleId !== undefined) data.testerPingRoleId = testerPingRoleId;
 
   return prisma.server.update({ where: { id: serverId }, data });
+}
+
+// A single hex color: #abc or #aabbcc.
+const HEX_COLOR = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+// A 2-stop linear gradient of exactly two hex colors at a whole-number
+// angle 0-360, e.g. "linear-gradient(135deg, #1a1f2b, #2d3a66)". This is
+// interpolated directly into a style attribute in the dashboard, so it's
+// validated strictly (whole match, not just a prefix) rather than trusted.
+const GRADIENT = /^linear-gradient\((\d{1,3})deg,\s*(#[0-9a-fA-F]{3,6}),\s*(#[0-9a-fA-F]{3,6})\)$/;
+
+function isValidBackgroundStyle(value) {
+  if (typeof value !== 'string') return false;
+  if (HEX_COLOR.test(value)) return true;
+  const gradientMatch = value.match(GRADIENT);
+  if (!gradientMatch) return false;
+  const angle = Number(gradientMatch[1]);
+  return angle >= 0 && angle <= 360;
+}
+
+async function updateServerAppearance({ serverId, actingDiscordId, backgroundStyle }) {
+  const perms = await getEffectivePermissions(serverId, actingDiscordId);
+  if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
+
+  if (backgroundStyle !== null && !isValidBackgroundStyle(backgroundStyle)) {
+    throw new Error('Background must be a hex color (#rrggbb) or a two-color gradient.');
+  }
+
+  return prisma.server.update({ where: { id: serverId }, data: { backgroundStyle } });
 }
 
 async function getServerById(serverId) {
@@ -834,6 +863,8 @@ module.exports = {
   removeMembershipOnLeave,
   getServerById,
   updateServerSettings,
+  updateServerAppearance,
+  isValidBackgroundStyle,
   getUserByDiscordId,
   verifyUser,
   assignOwnerRole,

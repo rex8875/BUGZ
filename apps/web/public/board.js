@@ -45,7 +45,35 @@ async function load() {
     state.permissions = me.permissions;
     state.retestChannelId = me.retestChannelId;
     state.testerPingRoleId = me.testerPingRoleId;
-    document.getElementById('server-name').textContent = 'Bug dashboard';
+    document.getElementById('server-name').textContent = me.serverName || 'Bug dashboard';
+    const avatarEl = document.getElementById('server-avatar');
+    if (me.iconUrl) {
+      avatarEl.src = me.iconUrl;
+      avatarEl.style.display = 'inline-block';
+    } else if (me.serverName) {
+      // No Discord icon set — fall back to an initials badge, same
+      // treatment as the server picker cards use.
+      const initials = me.serverName
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0].toUpperCase())
+        .join('');
+      const fallback = document.createElement('div');
+      fallback.className = 'server-avatar';
+      fallback.style.width = '38px';
+      fallback.style.height = '38px';
+      fallback.style.fontSize = '13px';
+      fallback.textContent = initials;
+      avatarEl.replaceWith(fallback);
+    }
+    if (me.backgroundStyle) {
+      if (me.backgroundStyle.startsWith('linear-gradient')) {
+        document.body.style.backgroundImage = `${me.backgroundStyle}, ${getComputedStyle(document.body).backgroundImage}`;
+      } else {
+        document.body.style.backgroundColor = me.backgroundStyle;
+      }
+    }
     document.getElementById('leaderboard-link').href = `/dashboard/${serverId}/leaderboard`;
     if (state.permissions.canManageSettings || state.permissions.canShareDashboard) {
       document.getElementById('settings-btn').style.display = 'inline-block';
@@ -86,13 +114,14 @@ async function loadReports() {
 function renderFilters() {
   const tabs = [{ key: null, label: 'Active' }, ...STATUSES.map((s) => ({ key: s, label: LABELS[s] }))];
   document.getElementById('filters').innerHTML =
+    `<div class="filter-group-label">Status</div><div class="filters">` +
     tabs
       .map(
         (t) =>
           `<div class="filter-pill ${state.filter.status === t.key && !state.filter.archived ? 'active' : ''}" data-status="${t.key || ''}">${t.label}</div>`,
       )
       .join('') +
-    `<div class="filter-pill ${state.filter.archived ? 'active' : ''}" data-archived="1">Archived</div>`;
+    `<div class="filter-pill ${state.filter.archived ? 'active' : ''}" data-archived="1">Archived</div></div>`;
 
   document.getElementById('filters').querySelectorAll('[data-status]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -108,9 +137,12 @@ function renderFilters() {
   });
 
   const priorityTabs = [{ key: null, label: 'All priorities' }, ...PRIORITIES.map((p) => ({ key: p, label: LABELS[p] }))];
-  document.getElementById('priority-filters').innerHTML = priorityTabs
-    .map((t) => `<div class="filter-pill ${state.filter.priority === t.key ? 'active' : ''}" data-priority="${t.key || ''}">${t.label}</div>`)
-    .join('');
+  document.getElementById('priority-filters').innerHTML =
+    `<div class="filter-group-label">Priority</div><div class="filters">` +
+    priorityTabs
+      .map((t) => `<div class="filter-pill ${state.filter.priority === t.key ? 'active' : ''}" data-priority="${t.key || ''}">${t.label}</div>`)
+      .join('') +
+    `</div>`;
 
   document.getElementById('priority-filters').querySelectorAll('[data-priority]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -118,6 +150,14 @@ function renderFilters() {
       loadReports();
     });
   });
+}
+
+function priorityStatusTagsHtml(report) {
+  return `
+    <div class="tag-row">
+      <span class="tag tag-priority-${report.priority}"><span class="tag-key">Priority:</span> ${LABELS[report.priority]}</span>
+      <span class="tag tag-status-${report.status}"><span class="tag-key">Status:</span> ${LABELS[report.status]}</span>
+    </div>`;
 }
 
 function quickActionsHtml(report) {
@@ -145,11 +185,12 @@ function renderList() {
   }
 
   list.innerHTML = state.reports
-    .map((r) => {
+    .map((r, i) => {
       const selected = r.id === state.selectedId;
       return `
-        <div class="report-row ${selected ? 'selected' : ''}" data-report-id="${r.id}">
+        <div class="report-row ${selected ? 'selected' : ''}" data-report-id="${r.id}" style="animation-delay:${Math.min(i, 12) * 22}ms">
           <div class="title">${escapeHtml(r.title)}</div>
+          ${priorityStatusTagsHtml(r)}
           ${selected ? quickActionsHtml(r) : ''}
         </div>`;
     })
@@ -184,7 +225,9 @@ function renderList() {
 
 function evidenceLinkHtml(fileUrl, link) {
   const url = fileUrl || link;
-  return url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">View ↗</a>` : '<span class="hint">None</span>';
+  return url
+    ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="raw-link" title="${escapeHtml(url)}">${escapeHtml(url)}</a>`
+    : '<span class="hint">None</span>';
 }
 
 function renderDetail() {
@@ -199,6 +242,7 @@ function renderDetail() {
     <div class="detail-panel">
       <h2>${escapeHtml(report.title)} ${state.permissions.canEditReports ? '<button data-edit-title>Edit title</button>' : ''}</h2>
       <div class="detail-meta">reported by ${escapeHtml(report.reporter?.discordUsername || 'unknown')} · ${escapeHtml(report.device || 'unspecified device')} · ${new Date(report.createdAt).toLocaleDateString()}</div>
+      <div class="detail-tags">${priorityStatusTagsHtml(report)}</div>
 
       <div class="detail-row"><div class="label">Description</div><div>${escapeHtml(report.description)} ${state.permissions.canEditReports ? '<button data-edit-description>Edit</button>' : ''}</div></div>
       ${report.stepsToReproduce ? `<div class="detail-row"><div class="label">Steps</div><div>${escapeHtml(report.stepsToReproduce)}</div></div>` : ''}
