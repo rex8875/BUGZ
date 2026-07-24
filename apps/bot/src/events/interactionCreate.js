@@ -39,6 +39,17 @@ module.exports = {
 
     // ---- Buttons ----
     if (interaction.isButton()) {
+      if (interaction.customId.startsWith('leaderboard_scope_') || interaction.customId.startsWith('leaderboard_refresh_')) {
+        const { buildLeaderboardPayload } = require('../commands/leaderboard');
+        const scope = interaction.customId.startsWith('leaderboard_scope_')
+          ? interaction.customId.replace('leaderboard_scope_', '')
+          : interaction.customId.replace('leaderboard_refresh_', '');
+        const server = await getServerByDiscordId(interaction.guildId);
+        if (!server) return interaction.update({ content: 'This server is not set up yet.', embeds: [], components: [] });
+        const payload = await buildLeaderboardPayload(server.id, scope);
+        return interaction.update(payload);
+      }
+
       if (interaction.customId === 'open_bug_report_modal1') {
         const user = await getUserByDiscordId(interaction.user.id);
         if (!user?.verifiedAt) {

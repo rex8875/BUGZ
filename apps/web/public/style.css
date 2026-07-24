@@ -169,9 +169,10 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
   font-weight: 500;
   cursor: pointer;
   border: 1px solid var(--line);
-  transition: all 120ms ease;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease, transform 90ms ease;
 }
 .filter-pill:hover { border-color: var(--line-bright); }
+.filter-pill:active { transform: scale(0.94); }
 .filter-pill.active { background: var(--amber-dim); color: var(--amber-bright); border-color: var(--amber); }
 
 .report-list { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
@@ -219,7 +220,10 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
   padding: 3px 8px;
   border-radius: 4px;
   white-space: nowrap;
+  animation: tag-pop 180ms cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
 }
+.tag:nth-child(2) { animation-delay: 40ms; }
+@keyframes tag-pop { from { opacity: 0; transform: scale(0.85); } to { opacity: 1; transform: scale(1); } }
 .tag .tag-key { opacity: 0.75; font-weight: 500; }
 
 .tag-priority-LOW { background: var(--low-dim); color: var(--low); }
@@ -251,7 +255,9 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
   padding: 22px 24px;
   margin-top: 16px;
   position: relative;
+  animation: panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
+@keyframes panel-in { from { opacity: 0; transform: translateY(-6px) scale(0.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .detail-panel::before {
   content: '';
   position: absolute;
@@ -259,7 +265,10 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
   height: 3px;
   background: linear-gradient(90deg, var(--amber), transparent 70%);
   border-radius: 0 0 3px 3px;
+  transform-origin: left;
+  animation: stripe-grow 320ms cubic-bezier(0.16, 1, 0.3, 1) 80ms backwards;
 }
+@keyframes stripe-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .detail-panel h2 { font-family: var(--font-display); font-size: 22px; font-weight: 700; margin: 4px 0 6px; text-transform: none; letter-spacing: 0; }
 .detail-meta { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-bottom: 14px; }
 .detail-tags { margin-bottom: 16px; }
@@ -299,7 +308,18 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
   margin-bottom: 14px;
   font-size: 13px;
   border: 1px solid rgba(224,85,79,0.35);
+  animation: banner-in 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+@keyframes banner-in {
+  0% { opacity: 0; transform: translateX(0); }
+  30% { opacity: 1; transform: translateX(-4px); }
+  55% { transform: translateX(3px); }
+  75% { transform: translateX(-2px); }
+  100% { transform: translateX(0); }
+}
+
+@keyframes pulse-fade { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+.loading-pulse { animation: pulse-fade 1.3s ease-in-out infinite; color: var(--text-faint); font-family: var(--font-mono); font-size: 12px; }
 
 /* =========================================================================
    Servers picker page — card grid, avatars, per-server background
@@ -392,6 +412,7 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
   padding: 18px 20px;
   margin-top: 10px;
   margin-bottom: 18px;
+  animation: panel-in 220ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 .appearance-panel h3 {
   font-family: var(--font-display);
@@ -422,7 +443,20 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
   border-radius: 6px;
   border: 1px solid var(--line-bright);
   flex-shrink: 0;
+  transition: background-color 120ms ease;
 }
+
+@keyframes save-flash {
+  0% { box-shadow: 0 0 0 0 rgba(79,191,133,0.55); }
+  100% { box-shadow: 0 0 0 10px rgba(79,191,133,0); }
+}
+button.save-success {
+  background: var(--status-fixed) !important;
+  border-color: var(--status-fixed) !important;
+  color: #0d2417 !important;
+  animation: save-flash 500ms ease-out;
+}
+
 .gradient-toggle-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
 .appearance-preview {
   height: 64px;

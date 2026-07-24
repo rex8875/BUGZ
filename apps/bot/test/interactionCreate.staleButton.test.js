@@ -1,6 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const path = require('node:path');
 
 // Reuses the exact fake-Prisma cache-swap technique from packages/db's own
 // test suite (packages/db/test/helpers/loadDb.js) so we can load the real
@@ -55,7 +54,7 @@ function makeStaleButtonInteraction(userId) {
 }
 
 test('clicking Continue after the draft is gone does NOT reopen the evidence modal (the originally reported bug)', async () => {
-  const { handler, drafts, dbModulePath, originalDbCache } = loadInteractionCreateWithFakeDb();
+  const { handler, dbModulePath, originalDbCache } = loadInteractionCreateWithFakeDb();
   try {
     const userId = 'stale-click-user';
     // No draft ever saved for this user — simulates post-submission state.
@@ -83,6 +82,64 @@ test('clicking Continue while a draft is still live DOES open the evidence modal
 
     assert.equal(interaction.calls.showModal.length, 1, 'a live draft should still be allowed to continue to the evidence modal');
     assert.equal(interaction.calls.update.length, 0);
+  } finally {
+    if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
+    else delete require.cache[dbModulePath];
+  }
+});
+
+test('clicking a leaderboard scope button updates the message in place with fresh data (no re-run of the slash command needed)', async () => {
+  const { handler, dbModulePath, originalDbCache } = loadInteractionCreateWithFakeDb();
+  try {
+    const dbModule = require(dbModulePath);
+    await dbModule.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
+    await dbModule.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
+
+    const calls = { update: [] };
+    const interaction = {
+      isAutocomplete: () => false,
+      isChatInputCommand: () => false,
+      isButton: () => true,
+      isModalSubmit: () => false,
+      customId: 'leaderboard_scope_weekly',
+      guildId: 'g1',
+      user: { id: 'owner1' },
+      update: async (payload) => { calls.update.push(payload); },
+    };
+
+    await handler.execute(interaction);
+
+    assert.equal(calls.update.length, 1, 'must call interaction.update, not interaction.reply — editing the same message in place');
+    assert.match(calls.update[0].embeds[0].data.title, /This week/, 'switching scope should rebuild with the requested scope');
+  } finally {
+    if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
+    else delete require.cache[dbModulePath];
+  }
+});
+
+test('a leaderboard refresh button rebuilds the same scope with fresh data', async () => {
+  const { handler, dbModulePath, originalDbCache } = loadInteractionCreateWithFakeDb();
+  try {
+    const dbModule = require(dbModulePath);
+    await dbModule.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
+    await dbModule.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
+
+    const calls = { update: [] };
+    const interaction = {
+      isAutocomplete: () => false,
+      isChatInputCommand: () => false,
+      isButton: () => true,
+      isModalSubmit: () => false,
+      customId: 'leaderboard_refresh_all-time',
+      guildId: 'g1',
+      user: { id: 'owner1' },
+      update: async (payload) => { calls.update.push(payload); },
+    };
+
+    await handler.execute(interaction);
+
+    assert.equal(calls.update.length, 1);
+    assert.match(calls.update[0].embeds[0].data.title, /All-time/);
   } finally {
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];

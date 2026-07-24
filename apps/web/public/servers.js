@@ -102,15 +102,19 @@ function renderCustomizePanel(s) {
     initialValue: s.backgroundStyle,
   });
 
-  document.getElementById(`save-appearance-${s.id}`).addEventListener('click', async () => {
+  document.getElementById(`save-appearance-${s.id}`).addEventListener('click', async (e) => {
     try {
       const updated = await api(`/api/servers/${s.id}/appearance`, {
         method: 'PATCH',
         body: JSON.stringify({ backgroundStyle: picker.getValue() }),
       });
       s.backgroundStyle = updated.backgroundStyle;
-      openCustomizeId = null;
-      renderGrid();
+      e.target.classList.add('save-success');
+      e.target.textContent = 'Saved ✓';
+      setTimeout(() => {
+        openCustomizeId = null;
+        renderGrid();
+      }, 420);
     } catch (err) {
       document.getElementById(`appearance-error-${s.id}`).textContent = err.message;
     }
