@@ -40,6 +40,13 @@ model Server {
   // Validated in updateServerAppearance() before it ever reaches here,
   // since this gets interpolated directly into a style attribute.
   backgroundStyle String?
+  // Incremented atomically each time a bug report is created in this
+  // server, and handed out as that report's bugNumber. Starts at 1.
+  nextBugNumber   Int      @default(1)
+  // Channel where "@user reported their Xth bug" announcements post.
+  // Separate from retestChannelId (retests) — a server may want these
+  // in different channels.
+  announceChannelId String?
 
   // False once the bot is kicked/removed from this Discord server. Data
   // is kept (reports, roles, members) — only dashboard visibility is
@@ -194,6 +201,14 @@ model BugReport {
   reporterId       String
   reporter         User       @relation("ReportedBy", fields: [reporterId], references: [id])
 
+  // A small, human-friendly sequential number scoped to this server
+  // (server's 1st, 2nd, 3rd... bug report) — used in announcements,
+  // /bug lookups, and anywhere a short reference is nicer than a cuid.
+  // Assigned from Server.nextBugNumber at creation time, inside the same
+  // transaction, so two reports can never collide even if submitted at
+  // the same instant.
+  bugNumber        Int
+
   title            String
   description      String
   stepsToReproduce String?
@@ -220,6 +235,8 @@ model BugReport {
   // DUPLICATE — lets the status flip back and forth without double
   // deducting or double-refunding.
   pointDeducted    Boolean    @default(false)
+
+  @@unique([serverId, bugNumber])
 }
 
 // Persistent per-server score, deliberately NOT derived by counting

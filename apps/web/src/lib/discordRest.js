@@ -22,7 +22,10 @@ async function discordRequest(path, options = {}) {
 // flipped. Pings the configured tester role if one's set, otherwise
 // falls back to mentioning the individual reporter.
 async function postRetestMessage({ channelId, report, ping, testerPingRoleId, triggeredByDiscordId }) {
-  const reportUrl = `${process.env.WEB_BASE_URL}/dashboard/${report.serverId}?report=${report.id}`;
+  // Public, unauthenticated readable view (see apps/web/src/routes/publicReport.js) —
+  // Discord can generate its own rich preview for this without anyone
+  // having to log in or leave the app, unlike the dashboard link.
+  const reportUrl = `${process.env.WEB_BASE_URL}/r/${report.id}`;
 
   const embed = {
     title: report.title,

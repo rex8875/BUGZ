@@ -694,8 +694,20 @@ async function createBugReport(serverId, reporterDiscordId, data) {
     if (data[field] !== undefined) reportData[field] = data[field];
   }
 
+  // Atomic increment on a single row — Prisma translates { increment: 1 }
+  // to a single UPDATE ... SET x = x + 1 statement, so two reports
+  // submitted at the same instant still get distinct numbers even
+  // without wrapping this in a $transaction (kept plain here so the
+  // fake-Prisma test client, which doesn't implement $transaction,
+  // still works against this function).
+  const updatedServer = await prisma.server.update({
+    where: { id: serverId },
+    data: { nextBugNumber: { increment: 1 } },
+  });
+  const bugNumber = updatedServer.nextBugNumber - 1;
+
   const report = await prisma.bugReport.create({
-    data: { serverId, reporterId: membership.userId, ...reportData },
+    data: { serverId, reporterId: membership.userId, bugNumber, ...reportData },
   });
 
   // Each submitted bug is worth a point immediately, both all-time and
@@ -724,6 +736,120 @@ async function searchBugReports(serverId, { search, priority } = {}) {
     orderBy: { createdAt: 'desc' },
     take: 25,
   });
+}
+
+function startOfDayUTC(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00.000Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+// The one function behind /list-bugs, /my-bugs, /bugs-by, and the
+// dashboard search bar — so "only non-archived/non-deleted", pagination,
+// and date/text/author filtering all live in exactly one place instead
+// of drifting across four separate implementations.
+//
+// Reports from people who've left the server still show up here (they're
+// still real BugReport + User rows — only Membership is affected by
+// leaving, and this never joins through Membership), which is the
+// explicit requirement: data preserved in lists, only the leaderboard
+// hides them.
+async function queryBugReports(serverId, options = {}) {
+  const {
+    reporterDiscordId,   // exact-match: for /my-bugs and /bugs-by
+    byUsername,          // partial-match on reporter's username: for the search bar's by: token
+    priority,
+    status,
+    archived = false,    // "non-archived, non-deleted" is the default everywhere
+    search,              // free text, matches title OR description
+    before, on, after,   // 'YYYY-MM-DD' strings
+    device,
+    page = 1,
+    pageSize = 10,
+  } = options;
+
+  const where = {
+    serverId,
+    archivedAt: archived ? { not: null } : null,
+    ...(priority ? { priority } : {}),
+    ...(status ? { status } : {}),
+    ...(device ? { device } : {}),
+  };
+
+  if (reporterDiscordId) {
+    const user = await prisma.user.findUnique({ where: { discordId: reporterDiscordId } });
+    if (!user) return { reports: [], page, pageSize, totalCount: 0, totalPages: 0 };
+    where.reporterId = user.id;
+  }
+  if (byUsername) {
+    where.reporter = { discordUsername: { contains: byUsername } };
+  }
+  if (search) {
+    where.OR = [{ title: { contains: search } }, { description: { contains: search } }];
+  }
+
+  const createdAt = {};
+  if (on) {
+    const start = startOfDayUTC(on);
+    if (start) {
+      createdAt.gte = start;
+      createdAt.lt = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    }
+  }
+  if (before) {
+    const start = startOfDayUTC(before);
+    if (start) createdAt.lt = createdAt.lt ? new Date(Math.min(createdAt.lt.getTime(), start.getTime())) : start;
+  }
+  if (after) {
+    const start = startOfDayUTC(after);
+    if (start) {
+      const boundary = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+      createdAt.gte = createdAt.gte ? new Date(Math.max(createdAt.gte.getTime(), boundary.getTime())) : boundary;
+    }
+  }
+  if (Object.keys(createdAt).length > 0) where.createdAt = createdAt;
+
+  const totalCount = await prisma.bugReport.count({ where });
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+
+  const reports = await prisma.bugReport.findMany({
+    where,
+    include: { reporter: true },
+    orderBy: { createdAt: 'desc' },
+    skip: (safePage - 1) * pageSize,
+    take: pageSize,
+  });
+
+  return { reports, page: safePage, pageSize, totalCount, totalPages };
+}
+
+async function getBugReportByNumber(serverId, bugNumber) {
+  return prisma.bugReport.findFirst({ where: { serverId, bugNumber: Number(bugNumber) }, include: { reporter: true } });
+}
+
+// Powers the public, unauthenticated /r/:reportId readable-view page —
+// deliberately returns only what's safe to show to anyone who has the
+// (unguessable cuid) link, same trust model as the existing ShareLink
+// feature. Evidence/F9 links and internal IDs are NOT included here;
+// those still require real dashboard access.
+async function getBugReportPublic(reportId) {
+  const report = await prisma.bugReport.findFirst({ where: { id: reportId }, include: { reporter: true } });
+  if (!report) return null;
+  const server = await prisma.server.findFirst({ where: { id: report.serverId } });
+  return {
+    id: report.id,
+    serverId: report.serverId,
+    serverName: server?.name || 'Unknown server',
+    bugNumber: report.bugNumber,
+    title: report.title,
+    description: report.description,
+    stepsToReproduce: report.stepsToReproduce,
+    device: report.device,
+    priority: report.priority,
+    status: report.status,
+    createdAt: report.createdAt,
+    reporterUsername: report.reporter?.discordUsername || 'unknown',
+  };
 }
 
 // For a tester checking their own submissions without dashboard access —
@@ -894,6 +1020,9 @@ module.exports = {
   redeemShareLink,
   createBugReport,
   searchBugReports,
+  queryBugReports,
+  getBugReportByNumber,
+  getBugReportPublic,
   listMyBugReports,
   getBugReport,
   listBugReports,

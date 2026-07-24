@@ -99,7 +99,7 @@ test('postRetestMessage embeds a clickable link to a readable view of the report
       });
 
       const embed = calls[0].body.embeds[0];
-      assert.equal(embed.url, 'https://bugz.example.com/dashboard/server-9?report=report-42', 'embed title should link to a readable view of this exact report');
+      assert.equal(embed.url, 'https://bugz.example.com/r/report-42', 'embed title should link to the public readable view of this exact report');
 
       const triggeredByField = embed.fields.find((f) => f.name === 'Triggered by');
       assert.ok(triggeredByField, 'must include a Triggered by field');

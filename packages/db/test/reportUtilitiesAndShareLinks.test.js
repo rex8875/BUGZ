@@ -13,13 +13,13 @@ test('deleteExpiredArchivedReports removes only reports archived more than 15 da
   const { server } = await setupServer(db);
 
   const old = fakeClient.bugReport.create({
-    data: { serverId: server.id, reporterId: 'owner1', title: 'old, should be deleted', status: 'FIXED', archivedAt: new Date(Date.now() - 16 * 24 * 60 * 60 * 1000) },
+    data: { bugNumber: 101, serverId: server.id, reporterId: 'owner1', title: 'old, should be deleted', status: 'FIXED', archivedAt: new Date(Date.now() - 16 * 24 * 60 * 60 * 1000) },
   });
   const recent = fakeClient.bugReport.create({
-    data: { serverId: server.id, reporterId: 'owner1', title: 'recent, should survive', status: 'FIXED', archivedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) },
+    data: { bugNumber: 102, serverId: server.id, reporterId: 'owner1', title: 'recent, should survive', status: 'FIXED', archivedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) },
   });
   const neverArchived = fakeClient.bugReport.create({
-    data: { serverId: server.id, reporterId: 'owner1', title: 'never archived', status: 'NEW' },
+    data: { bugNumber: 103, serverId: server.id, reporterId: 'owner1', title: 'never archived', status: 'NEW' },
   });
 
   const deletedCount = await db.deleteExpiredArchivedReports();
@@ -35,8 +35,8 @@ test('deleteExpiredArchivedReports never touches a different server\'s reports d
   const { server: serverA } = await setupServer(db);
   const serverB = await db.createServerOnJoin({ discordServerId: 'gB', name: 'B', ownerDiscordId: 'ownerB' });
 
-  fakeClient.bugReport.create({ data: { serverId: serverA.id, reporterId: 'owner1', title: 'a-old', status: 'FIXED', archivedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000) } });
-  fakeClient.bugReport.create({ data: { serverId: serverB.id, reporterId: 'ownerB', title: 'b-old', status: 'FIXED', archivedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000) } });
+  fakeClient.bugReport.create({ data: { bugNumber: 104, serverId: serverA.id, reporterId: 'owner1', title: 'a-old', status: 'FIXED', archivedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000) } });
+  fakeClient.bugReport.create({ data: { bugNumber: 105, serverId: serverB.id, reporterId: 'ownerB', title: 'b-old', status: 'FIXED', archivedAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000) } });
 
   const deletedCount = await db.deleteExpiredArchivedReports();
   assert.equal(deletedCount, 2, 'the sweep should catch expired reports across every server');

@@ -49,7 +49,7 @@ const SCHEMA = {
       roles: { type: 'hasMany', model: 'role', fk: 'serverId' },
       memberships: { type: 'hasMany', model: 'membership', fk: 'serverId' },
     },
-    defaults: { isActive: true },
+    defaults: { isActive: true, nextBugNumber: 1 },
   },
   role: {
     uniques: ['id'],
@@ -97,7 +97,13 @@ const SCHEMA = {
   },
   bugReport: {
     uniques: ['id'],
+    compoundUniques: { serverId_bugNumber: ['serverId', 'bugNumber'] },
     relations: { reporter: { type: 'belongsTo', model: 'user', fk: 'reporterId' } },
+    // Mirrors @default("MEDIUM") / @default("NEW") / @default(false) in
+    // schema.prisma — previously missing here entirely, which meant any
+    // test relying on the schema default (rather than always passing
+    // priority/status explicitly) silently got `undefined` instead.
+    defaults: { priority: 'MEDIUM', status: 'NEW', pointDeducted: false },
   },
   leaderboardScore: {
     uniques: ['id'],
@@ -157,6 +163,10 @@ class Table {
   // compound unique objects, relation filters (nested where on a related
   // record), and the small set of operators actually used (not, lt, contains).
   matchesCondition(record, key, value) {
+    if (key === 'OR') {
+      return value.some((subWhere) => this.matches(record, subWhere));
+    }
+
     if (this.schema.compoundUniques?.[key]) {
       return this.schema.compoundUniques[key].every((field) => valuesEqual(record[field], value[field]));
     }
@@ -184,12 +194,13 @@ class Table {
       if ('not' in value && Object.keys(value).length === 1) {
         return value.not === null ? !isNullish(record[key]) : !valuesEqual(record[key], value.not);
       }
-      if ('lt' in value || 'not' in value) {
+      if ('lt' in value || 'gte' in value || 'not' in value) {
         if (value.not !== undefined) {
           const excluded = value.not === null ? isNullish(record[key]) : valuesEqual(record[key], value.not);
           if (excluded) return false;
         }
         if (value.lt !== undefined && !(new Date(record[key]) < new Date(value.lt))) return false;
+        if (value.gte !== undefined && !(new Date(record[key]) >= new Date(value.gte))) return false;
         return true;
       }
       if ('contains' in value) {
@@ -274,10 +285,11 @@ class Table {
     return include ? this.applyInclude(record, include) : record;
   }
 
-  findMany({ where, include, orderBy, take } = {}) {
+  findMany({ where, include, orderBy, skip, take } = {}) {
     let rows = where ? this.all().filter((r) => this.matches(r, where)) : this.all();
     rows = this.sortRows(rows, orderBy);
-    if (take) rows = rows.slice(0, take);
+    if (skip) rows = rows.slice(skip);
+    if (take !== undefined) rows = rows.slice(0, take);
     return include ? rows.map((r) => this.applyInclude(r, include)) : rows;
   }
 
@@ -317,7 +329,11 @@ class Table {
   update({ where, data }) {
     const existing = this.findFirst({ where });
     if (!existing) throw new Error(`Record not found in ${this.name}`);
-    const updated = { ...this.rows.get(existing.id), ...data };
+    const resolved = {};
+    for (const [k, v] of Object.entries(data)) {
+      resolved[k] = isPlainObject(v) && 'increment' in v ? existing[k] + v.increment : v;
+    }
+    const updated = { ...this.rows.get(existing.id), ...resolved };
     for (const field of AUTO_NOW_ON_UPDATE[this.name] || []) updated[field] = fakeNow();
     this.checkUniqueConstraints(updated, existing.id);
     this.rows.set(existing.id, updated);

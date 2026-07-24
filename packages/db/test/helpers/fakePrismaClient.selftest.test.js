@@ -75,8 +75,8 @@ test('relation filtering in where (belongsTo nested condition)', () => {
 
 test('operators: not, lt, contains', () => {
   const db = createFakePrismaClient();
-  db.bugReport.create({ data: { serverId: 's1', title: 'Floor breaks', archivedAt: null, createdAt: new Date('2026-01-01') } });
-  db.bugReport.create({ data: { serverId: 's1', title: 'Wall clips', archivedAt: new Date('2026-01-05'), createdAt: new Date('2026-01-05') } });
+  db.bugReport.create({ data: { bugNumber: 1, serverId: 's1', title: 'Floor breaks', archivedAt: null, createdAt: new Date('2026-01-01') } });
+  db.bugReport.create({ data: { bugNumber: 2, serverId: 's1', title: 'Wall clips', archivedAt: new Date('2026-01-05'), createdAt: new Date('2026-01-05') } });
 
   assert.equal(db.bugReport.findMany({ where: { archivedAt: null } }).length, 1);
   assert.equal(db.bugReport.findMany({ where: { archivedAt: { not: null } } }).length, 1);
@@ -128,9 +128,9 @@ test('nested create on hasMany relation (server.create with roles: { create: [..
 
 test('orderBy: simple field and nested relation field', () => {
   const db = createFakePrismaClient();
-  db.bugReport.create({ data: { serverId: 's1', title: 'a', createdAt: new Date('2026-01-01') } });
-  db.bugReport.create({ data: { serverId: 's1', title: 'b', createdAt: new Date('2026-01-03') } });
-  db.bugReport.create({ data: { serverId: 's1', title: 'c', createdAt: new Date('2026-01-02') } });
+  db.bugReport.create({ data: { bugNumber: 3, serverId: 's1', title: 'a', createdAt: new Date('2026-01-01') } });
+  db.bugReport.create({ data: { bugNumber: 4, serverId: 's1', title: 'b', createdAt: new Date('2026-01-03') } });
+  db.bugReport.create({ data: { bugNumber: 5, serverId: 's1', title: 'c', createdAt: new Date('2026-01-02') } });
 
   const desc = db.bugReport.findMany({ where: { serverId: 's1' }, orderBy: { createdAt: 'desc' } });
   assert.deepEqual(desc.map((r) => r.title), ['b', 'c', 'a']);
@@ -149,9 +149,9 @@ test('orderBy: simple field and nested relation field', () => {
 
 test('updateMany, deleteMany, and count respect where filters (not just affect everything)', () => {
   const db = createFakePrismaClient();
-  db.bugReport.create({ data: { serverId: 's1', title: 'a', status: 'NEW' } });
-  db.bugReport.create({ data: { serverId: 's1', title: 'b', status: 'NEW' } });
-  db.bugReport.create({ data: { serverId: 's2', title: 'c', status: 'NEW' } });
+  db.bugReport.create({ data: { bugNumber: 6, serverId: 's1', title: 'a', status: 'NEW' } });
+  db.bugReport.create({ data: { bugNumber: 7, serverId: 's1', title: 'b', status: 'NEW' } });
+  db.bugReport.create({ data: { bugNumber: 8, serverId: 's2', title: 'c', status: 'NEW' } });
 
   const { count: updateCount } = db.bugReport.updateMany({ where: { serverId: 's1' }, data: { status: 'FIXED' } });
   assert.equal(updateCount, 2);
@@ -164,10 +164,10 @@ test('updateMany, deleteMany, and count respect where filters (not just affect e
 
 test('groupBy counts per distinct value of the grouping field', () => {
   const db = createFakePrismaClient();
-  db.bugReport.create({ data: { serverId: 's1', status: 'NEW', archivedAt: null } });
-  db.bugReport.create({ data: { serverId: 's1', status: 'NEW', archivedAt: null } });
-  db.bugReport.create({ data: { serverId: 's1', status: 'FIXED', archivedAt: null } });
-  db.bugReport.create({ data: { serverId: 's1', status: 'FIXED', archivedAt: new Date() } }); // archived, should be excluded by where
+  db.bugReport.create({ data: { bugNumber: 9, serverId: 's1', status: 'NEW', archivedAt: null } });
+  db.bugReport.create({ data: { bugNumber: 10, serverId: 's1', status: 'NEW', archivedAt: null } });
+  db.bugReport.create({ data: { bugNumber: 11, serverId: 's1', status: 'FIXED', archivedAt: null } });
+  db.bugReport.create({ data: { bugNumber: 12, serverId: 's1', status: 'FIXED', archivedAt: new Date() } }); // archived, should be excluded by where
 
   const grouped = db.bugReport.groupBy({ by: ['status'], where: { serverId: 's1', archivedAt: null }, _count: true });
   const asMap = Object.fromEntries(grouped.map((g) => [g.status, g._count]));
@@ -226,8 +226,8 @@ test('compound unique matching compares Date fields by value, not by object refe
 
 test('{ not: null } correctly excludes fields that were never set (undefined), not just ones explicitly set to null', () => {
   const db = createFakePrismaClient();
-  db.bugReport.create({ data: { serverId: 's1', title: 'never archived' } }); // archivedAt omitted entirely -> undefined
-  db.bugReport.create({ data: { serverId: 's1', title: 'archived', archivedAt: new Date('2026-01-01') } });
+  db.bugReport.create({ data: { bugNumber: 13, serverId: 's1', title: 'never archived' } }); // archivedAt omitted entirely -> undefined
+  db.bugReport.create({ data: { bugNumber: 14, serverId: 's1', title: 'archived', archivedAt: new Date('2026-01-01') } });
 
   const archivedOnly = db.bugReport.findMany({ where: { archivedAt: { not: null } } });
   assert.equal(archivedOnly.length, 1, 'an omitted field must be treated as null, so it should NOT satisfy "not null"');
@@ -261,15 +261,15 @@ test('update() throws if changing a field would collide with a different existin
 
 test('create() auto-populates createdAt-style fields when omitted, matching @default(now())', () => {
   const db = createFakePrismaClient();
-  const report = db.bugReport.create({ data: { serverId: 's1', title: 't' } });
+  const report = db.bugReport.create({ data: { bugNumber: 15, serverId: 's1', title: 't' } });
   assert.ok(report.createdAt instanceof Date, 'createdAt should be auto-populated, not undefined');
 });
 
 test('records created in quick succession get strictly increasing timestamps, not identical ones', () => {
   const db = createFakePrismaClient();
-  const a = db.bugReport.create({ data: { serverId: 's1', title: 'a' } });
-  const b = db.bugReport.create({ data: { serverId: 's1', title: 'b' } });
-  const c = db.bugReport.create({ data: { serverId: 's1', title: 'c' } });
+  const a = db.bugReport.create({ data: { bugNumber: 16, serverId: 's1', title: 'a' } });
+  const b = db.bugReport.create({ data: { bugNumber: 17, serverId: 's1', title: 'b' } });
+  const c = db.bugReport.create({ data: { bugNumber: 18, serverId: 's1', title: 'c' } });
   assert.ok(a.createdAt.getTime() < b.createdAt.getTime());
   assert.ok(b.createdAt.getTime() < c.createdAt.getTime());
 });
@@ -277,13 +277,13 @@ test('records created in quick succession get strictly increasing timestamps, no
 test('an explicitly provided timestamp is respected, not overwritten by the auto-now default', () => {
   const db = createFakePrismaClient();
   const explicit = new Date('2020-01-01T00:00:00Z');
-  const report = db.bugReport.create({ data: { serverId: 's1', title: 't', createdAt: explicit } });
+  const report = db.bugReport.create({ data: { bugNumber: 19, serverId: 's1', title: 't', createdAt: explicit } });
   assert.equal(report.createdAt.getTime(), explicit.getTime());
 });
 
 test('update() and updateMany() bump @updatedAt-style fields automatically, regardless of what data was passed', () => {
   const db = createFakePrismaClient();
-  const report = db.bugReport.create({ data: { serverId: 's1', title: 't' } });
+  const report = db.bugReport.create({ data: { bugNumber: 20, serverId: 's1', title: 't' } });
   const originalUpdatedAt = report.updatedAt;
 
   const updated = db.bugReport.update({ where: { id: report.id }, data: { title: 'changed' } });

@@ -7,6 +7,7 @@ const authRoutes = require('./routes/auth');
 const shareRoutes = require('./routes/share');
 const dashboardRoutes = require('./routes/dashboard');
 const apiRoutes = require('./routes/api');
+const publicReportRoutes = require('./routes/publicReport');
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use(authRoutes);
 app.use(shareRoutes);
 app.use(dashboardRoutes);
 app.use(apiRoutes);
+app.use(publicReportRoutes);
 
 app.get('/', (req, res) => {
   res.redirect(req.session.discordId ? '/dashboard' : '/auth/discord');

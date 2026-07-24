@@ -12,6 +12,7 @@
     "express-session": "^1.18.0"
   },
   "devDependencies": {
-    "jsdom": "^25.0.0"
+    "jsdom": "^25.0.0",
+    "supertest": "^7.0.0"
   }
 }
