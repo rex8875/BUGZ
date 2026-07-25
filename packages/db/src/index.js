@@ -91,13 +91,14 @@ async function removeMembershipOnLeave(serverId, discordId) {
   await logAction(serverId, discordId, 'MEMBER_LEFT_DISCORD', {});
 }
 
-async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId }) {
+async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId, announceChannelId }) {
   const perms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
 
   const data = {};
   if (retestChannelId !== undefined) data.retestChannelId = retestChannelId;
   if (testerPingRoleId !== undefined) data.testerPingRoleId = testerPingRoleId;
+  if (announceChannelId !== undefined) data.announceChannelId = announceChannelId;
 
   return prisma.server.update({ where: { id: serverId }, data });
 }
@@ -823,6 +824,16 @@ async function queryBugReports(serverId, options = {}) {
   return { reports, page: safePage, pageSize, totalCount, totalPages };
 }
 
+// How many bugs this person has ever reported in this server — used for
+// the "@user reported their Xth bug" announcement. Counts archived
+// reports too (archiving isn't un-reporting it); deleted reports are
+// physically gone from the table already, so they're excluded for free.
+async function countBugReportsByReporter(serverId, reporterDiscordId) {
+  const user = await prisma.user.findUnique({ where: { discordId: reporterDiscordId } });
+  if (!user) return 0;
+  return prisma.bugReport.count({ where: { serverId, reporterId: user.id } });
+}
+
 async function getBugReportByNumber(serverId, bugNumber) {
   return prisma.bugReport.findFirst({ where: { serverId, bugNumber: Number(bugNumber) }, include: { reporter: true } });
 }
@@ -1022,6 +1033,7 @@ module.exports = {
   searchBugReports,
   queryBugReports,
   getBugReportByNumber,
+  countBugReportsByReporter,
   getBugReportPublic,
   listMyBugReports,
   getBugReport,

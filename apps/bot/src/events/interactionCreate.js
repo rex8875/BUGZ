@@ -1,5 +1,6 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { getUserByDiscordId, getServerByDiscordId, getMembership, createBugReport, permissionsFromRoles, rolesOf } = require('@bugtracker/db');
+const { getUserByDiscordId, getServerByDiscordId, getMembership, createBugReport, countBugReportsByReporter, permissionsFromRoles, rolesOf } = require('@bugtracker/db');
+const { postNewReportAnnouncement } = require('../lib/announcements');
 const { buildCoreModal, buildEvidenceModal } = require('../lib/bugReportModals');
 const { saveDraft, getDraft, clearDraft } = require('../lib/bugReportDrafts');
 
@@ -128,8 +129,9 @@ module.exports = {
 
         const server = await getServerByDiscordId(interaction.guildId);
 
+        let report;
         try {
-          await createBugReport(server.id, interaction.user.id, {
+          report = await createBugReport(server.id, interaction.user.id, {
             ...draft,
             evidenceLink,
             f9Link,
@@ -143,6 +145,24 @@ module.exports = {
         }
 
         clearDraft(interaction.user.id);
+
+        // Best-effort: a missing/deleted announce channel, or the bot
+        // lacking send permission there, must never block confirming the
+        // submission to the reporter — it's a nice-to-have, not part of
+        // the report actually being saved.
+        if (server.announceChannelId) {
+          countBugReportsByReporter(server.id, interaction.user.id)
+            .then((reportCountForUser) =>
+              postNewReportAnnouncement({
+                client: interaction.client,
+                channelId: server.announceChannelId,
+                report,
+                reporterDiscordId: interaction.user.id,
+                reportCountForUser,
+              }),
+            )
+            .catch(() => {});
+        }
 
         // The report is in — disable the Continue button on the modal-1
         // reply message so a stale click can never reopen this form again.

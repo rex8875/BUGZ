@@ -24,13 +24,13 @@ async function discordRequest(path, options = {}) {
 async function postRetestMessage({ channelId, report, ping, testerPingRoleId, triggeredByDiscordId }) {
   // Public, unauthenticated readable view (see apps/web/src/routes/publicReport.js) —
   // Discord can generate its own rich preview for this without anyone
-  // having to log in or leave the app, unlike the dashboard link.
+  // having to log in or leave the app.
   const reportUrl = `${process.env.WEB_BASE_URL}/r/${report.id}`;
 
   const embed = {
     title: report.title,
-    // Makes the embed title a clickable link straight to a readable view
-    // of this exact report on the dashboard (auto-expands there).
+    // Makes the embed title a clickable link straight to the public
+    // readable view of this exact report.
     url: reportUrl,
     description: report.description,
     color: 0x3ba55d,
