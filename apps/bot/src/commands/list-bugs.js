@@ -1,17 +1,13 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getServerByDiscordId, getMembership, searchBugReports } = require('@bugtracker/db');
-
-const STATUS_LABELS = {
-  NEW: 'New', NEEDS_INFO: 'Needs info', FIXED: 'Fixed', NOT_A_BUG: 'Not a bug',
-  DUPLICATE: 'Duplicate', WONT_FIX: "Won't fix",
-};
+const { SlashCommandBuilder } = require('discord.js');
+const { getServerByDiscordId, getMembership, queryBugReports } = require('@bugtracker/db');
+const { buildBugListPayload } = require('../lib/bugListPayload');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('list-bugs')
     .setDescription('Check existing bug reports before submitting a new one, to avoid duplicates')
     .addStringOption((opt) =>
-      opt.setName('search').setDescription('Filter by keyword in the title').setRequired(false),
+      opt.setName('search').setDescription('Filter by keyword in the title or description').setRequired(false).setMaxLength(50),
     )
     .addStringOption((opt) =>
       opt
@@ -37,23 +33,17 @@ module.exports = {
 
     const search = interaction.options.getString('search');
     const priority = interaction.options.getString('priority');
-    const reports = await searchBugReports(server.id, { search, priority });
+    const queryResult = await queryBugReports(server.id, { search, priority, page: 1, pageSize: 5 });
 
-    if (reports.length === 0) {
-      return interaction.reply({
-        content: search ? `No open reports match "${search}". Looks like a new one!` : 'No open reports match those filters.',
-        ephemeral: true,
-      });
-    }
+    const payload = buildBugListPayload({
+      title: search ? `Reports matching "${search}"` : 'Open reports',
+      queryResult,
+      mode: 'all',
+      priority,
+      search,
+      emptyMessage: search ? `No reports match "${search}". Looks like a new one!` : 'No reports match those filters.',
+    });
 
-    const embed = new EmbedBuilder()
-      .setTitle(search ? `Open reports matching "${search}"` : 'Open reports')
-      .setColor(0x5865f2)
-      .setDescription(
-        reports.map((r) => `**${r.title}** — ${r.priority} · ${STATUS_LABELS[r.status] || r.status}`).join('\n'),
-      )
-      .setFooter({ text: "If yours is already here, don't submit a duplicate — it'll cost the point." });
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply({ ...payload, ephemeral: true });
   },
 };

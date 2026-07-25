@@ -1,10 +1,6 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const { getServerByDiscordId, listMyBugReports } = require('@bugtracker/db');
-
-const STATUS_LABELS = {
-  NEW: 'New', NEEDS_INFO: 'Needs info', FIXED: 'Fixed', NOT_A_BUG: 'Not a bug',
-  DUPLICATE: 'Duplicate', WONT_FIX: "Won't fix",
-};
+const { SlashCommandBuilder } = require('discord.js');
+const { getServerByDiscordId, queryBugReports } = require('@bugtracker/db');
+const { buildBugListPayload } = require('../lib/bugListPayload');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -15,21 +11,18 @@ module.exports = {
     const server = await getServerByDiscordId(interaction.guildId);
     if (!server) return interaction.reply({ content: 'This server is not set up yet.', ephemeral: true });
 
-    const reports = await listMyBugReports(server.id, interaction.user.id);
-    if (reports.length === 0) {
-      return interaction.reply({ content: "You haven't reported any bugs here yet.", ephemeral: true });
-    }
+    // archived defaults to false in queryBugReports — only non-archived,
+    // non-deleted reports show here, as requested.
+    const queryResult = await queryBugReports(server.id, { reporterDiscordId: interaction.user.id, page: 1, pageSize: 5 });
 
-    const embed = new EmbedBuilder()
-      .setTitle('Your bug reports')
-      .setColor(0x5865f2)
-      .setDescription(
-        reports
-          .slice(0, 10)
-          .map((r) => `**${r.title}** — ${STATUS_LABELS[r.status] || r.status}${r.archivedAt ? ' (archived)' : ''}`)
-          .join('\n'),
-      );
+    const payload = buildBugListPayload({
+      title: 'Your bug reports',
+      queryResult,
+      mode: 'mine',
+      targetDiscordId: interaction.user.id,
+      emptyMessage: "You haven't reported any bugs here yet.",
+    });
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply({ ...payload, ephemeral: true });
   },
 };

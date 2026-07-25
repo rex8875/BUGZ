@@ -1,6 +1,7 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { getUserByDiscordId, getServerByDiscordId, getMembership, createBugReport, countBugReportsByReporter, permissionsFromRoles, rolesOf } = require('@bugtracker/db');
+const { getUserByDiscordId, getServerByDiscordId, getMembership, createBugReport, countBugReportsByReporter, queryBugReports, permissionsFromRoles, rolesOf } = require('@bugtracker/db');
 const { postNewReportAnnouncement } = require('../lib/announcements');
+const { buildBugListPayload, decodeBugListCustomId } = require('../lib/bugListPayload');
 const { buildCoreModal, buildEvidenceModal } = require('../lib/bugReportModals');
 const { saveDraft, getDraft, clearDraft } = require('../lib/bugReportDrafts');
 
@@ -40,6 +41,41 @@ module.exports = {
 
     // ---- Buttons ----
     if (interaction.isButton()) {
+      if (interaction.customId.startsWith('buglist:')) {
+        const { mode, page, priority, search, targetDiscordId } = decodeBugListCustomId(interaction.customId);
+        const server = await getServerByDiscordId(interaction.guildId);
+        if (!server) return interaction.update({ content: 'This server is not set up yet.', embeds: [], components: [] });
+
+        // Re-check tester-program membership on every page click, not
+        // just when the command was first run — a stale button in an
+        // old ephemeral message shouldn't outlive someone's access.
+        const membership = await getMembership(server.id, interaction.user.id);
+        if (!membership) {
+          return interaction.update({ content: "You're not a member of this server's tester program.", embeds: [], components: [] });
+        }
+
+        let queryResult, title, emptyMessage;
+        if (mode === 'mine') {
+          // Always the clicking user's own reports, regardless of what's
+          // encoded in the customId — never someone else's, even if the
+          // id were somehow tampered with.
+          queryResult = await queryBugReports(server.id, { reporterDiscordId: interaction.user.id, page, pageSize: 5 });
+          title = 'Your bug reports';
+          emptyMessage = "You haven't reported any bugs here yet.";
+        } else if (mode === 'by') {
+          queryResult = await queryBugReports(server.id, { reporterDiscordId: targetDiscordId, page, pageSize: 5 });
+          title = `Bugs reported by <@${targetDiscordId}>`;
+          emptyMessage = "That person hasn't reported any bugs here (that are still visible).";
+        } else {
+          queryResult = await queryBugReports(server.id, { priority, search, page, pageSize: 5 });
+          title = search ? `Reports matching "${search}"` : 'Open reports';
+          emptyMessage = search ? `No reports match "${search}".` : 'No reports match those filters.';
+        }
+
+        const payload = buildBugListPayload({ title, queryResult, mode, priority, search, targetDiscordId, emptyMessage });
+        return interaction.update(payload);
+      }
+
       if (interaction.customId.startsWith('leaderboard_scope_') || interaction.customId.startsWith('leaderboard_refresh_')) {
         const { buildLeaderboardPayload } = require('../commands/leaderboard');
         const scope = interaction.customId.startsWith('leaderboard_scope_')
