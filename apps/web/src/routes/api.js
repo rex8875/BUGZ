@@ -2,7 +2,7 @@ const express = require('express');
 const {
   getServerById,
   getEffectivePermissions,
-  listBugReports,
+  queryBugReports,
   getBugReport,
   updateBugReport,
   deleteBugReport,
@@ -97,11 +97,24 @@ router.patch('/api/servers/:serverId/appearance', async (req, res) => {
 });
 
 router.get('/api/servers/:serverId/reports', async (req, res) => {
-  const { priority, status, archived } = req.query;
-  const reports = await listBugReports(req.server.id, {
+  const { priority, status, archived, search, before, on, after, by, device } = req.query;
+  const { reports } = await queryBugReports(req.server.id, {
     priority: priority || undefined,
     status: status || undefined,
-    archivedOnly: archived === 'true',
+    archived: archived === 'true',
+    search: search || undefined,
+    before: before || undefined,
+    on: on || undefined,
+    after: after || undefined,
+    byUsername: by || undefined,
+    device: device || undefined,
+    // The dashboard board doesn't paginate (yet) — it renders one full
+    // filtered list — so this asks for effectively "everything that
+    // matches" rather than a page. queryBugReports still needs SOME
+    // cap; 500 is far beyond what a single board view would ever
+    // usefully show at once.
+    page: 1,
+    pageSize: 500,
   });
   res.json(reports);
 });

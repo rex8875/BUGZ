@@ -140,6 +140,67 @@ test('board.html opens directly to a specific report when linked via ?report=<id
   assert.match(detailPanel.textContent, /Deep linked bug/);
 });
 
+test('the dashboard search bar parses tokens (before/on/after/by/device) and free text, and sends them all to the API on Enter', async () => {
+  const calledUrls = [];
+  const dom = await renderPage({
+    htmlFile: 'board.html',
+    scripts: ['board.js'],
+    fetchImpl: async (url) => {
+      calledUrls.push(String(url));
+      if (String(url).includes('/me')) {
+        return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'Alpha', iconUrl: null, backgroundStyle: null }) };
+      }
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 0 }) };
+      return { ok: true, status: 200, json: async () => [] };
+    },
+  });
+  const doc = dom.window.document;
+  const input = doc.getElementById('search-input');
+
+  calledUrls.length = 0; // clear the initial page-load calls, only care about the search-triggered one
+  input.value = 'basement by:alice after:2024-01-01 device:PC';
+  input.dispatchEvent(new dom.window.Event('input'));
+  input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  const searchCall = calledUrls.find((u) => u.includes('/reports?'));
+  assert.ok(searchCall, 'a reports query should have been sent');
+  assert.match(searchCall, /search=basement/);
+  assert.match(searchCall, /by=alice/);
+  assert.match(searchCall, /after=2024-01-01/);
+  assert.match(searchCall, /device=PC/);
+
+  // The hint should reflect what was actually parsed, for user feedback.
+  assert.match(doc.getElementById('search-hint').textContent, /basement/);
+  assert.match(doc.getElementById('search-hint').textContent, /alice/);
+});
+
+test('the search bar treats an unrecognized "word:value" token as free text rather than silently dropping it', async () => {
+  const calledUrls = [];
+  const dom = await renderPage({
+    htmlFile: 'board.html',
+    scripts: ['board.js'],
+    fetchImpl: async (url) => {
+      calledUrls.push(String(url));
+      if (String(url).includes('/me')) {
+        return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'Alpha', iconUrl: null, backgroundStyle: null }) };
+      }
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 0 }) };
+      return { ok: true, status: 200, json: async () => [] };
+    },
+  });
+  const doc = dom.window.document;
+  const input = doc.getElementById('search-input');
+
+  calledUrls.length = 0;
+  input.value = 'ratio:high crash';
+  input.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  const searchCall = calledUrls.find((u) => u.includes('/reports?'));
+  assert.match(decodeURIComponent(searchCall).replace(/\+/g, ' '), /search=ratio:high crash/);
+});
+
 test('board.html shows the raw evidence/F9 URL as visible text, not a generic "View" link', async () => {
   const dom = await renderPage({
     htmlFile: 'board.html',

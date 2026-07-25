@@ -16,7 +16,7 @@ const state = {
   reports: [],
   selectedId: null,
   expandedId: null,
-  filter: { status: null, priority: null, archived: false },
+  filter: { status: null, priority: null, archived: false, search: null, before: null, on: null, after: null, byUsername: null, device: null },
 };
 
 async function api(path, options = {}) {
@@ -123,11 +123,44 @@ async function loadSummary() {
   document.getElementById('summary-strip').textContent = parts.join(' · ');
 }
 
+// Parses "basement before:2024-01-01 by:alice" into structured filters.
+// Anything not matching a known key:value token is treated as free text
+// and matched against title/description server-side. Recognized keys:
+// before, on, after (dates, YYYY-MM-DD), by (username substring),
+// device. Unknown "word:value" tokens are left as-is in the free text
+// (so a title that happens to contain a colon still searches sanely).
+const SEARCH_TOKEN_KEYS = ['before', 'on', 'after', 'by', 'device'];
+
+function parseSearchInput(raw) {
+  const result = { search: null, before: null, on: null, after: null, byUsername: null, device: null };
+  const leftoverWords = [];
+
+  for (const word of raw.trim().split(/\s+/).filter(Boolean)) {
+    const match = word.match(/^([a-zA-Z]+):(.+)$/);
+    const key = match ? match[1].toLowerCase() : null;
+    if (match && SEARCH_TOKEN_KEYS.includes(key)) {
+      if (key === 'by') result.byUsername = match[2];
+      else result[key] = match[2];
+    } else {
+      leftoverWords.push(word);
+    }
+  }
+
+  result.search = leftoverWords.length > 0 ? leftoverWords.join(' ') : null;
+  return result;
+}
+
 async function loadReports() {
   const params = new URLSearchParams();
   if (state.filter.status) params.set('status', state.filter.status);
   if (state.filter.priority) params.set('priority', state.filter.priority);
   params.set('archived', state.filter.archived ? 'true' : 'false');
+  if (state.filter.search) params.set('search', state.filter.search);
+  if (state.filter.before) params.set('before', state.filter.before);
+  if (state.filter.on) params.set('on', state.filter.on);
+  if (state.filter.after) params.set('after', state.filter.after);
+  if (state.filter.byUsername) params.set('by', state.filter.byUsername);
+  if (state.filter.device) params.set('device', state.filter.device);
   state.reports = await api(`/api/servers/${serverId}/reports?${params}`);
   renderFilters();
   renderList();
@@ -464,5 +497,37 @@ function renderLinkList(links) {
     });
   });
 }
+
+function updateSearchHint() {
+  const f = state.filter;
+  const parts = [];
+  if (f.search) parts.push(`text: "${f.search}"`);
+  if (f.before) parts.push(`before ${f.before}`);
+  if (f.on) parts.push(`on ${f.on}`);
+  if (f.after) parts.push(`after ${f.after}`);
+  if (f.byUsername) parts.push(`by ${f.byUsername}`);
+  if (f.device) parts.push(`device ${f.device}`);
+  document.getElementById('search-hint').textContent = parts.length > 0 ? `Searching: ${parts.join(' · ')}` : '';
+}
+
+function runSearch(rawValue) {
+  const parsed = parseSearchInput(rawValue);
+  Object.assign(state.filter, parsed);
+  updateSearchHint();
+  loadReports();
+}
+
+let searchDebounceTimer = null;
+const searchInputEl = document.getElementById('search-input');
+searchInputEl.addEventListener('input', () => {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => runSearch(searchInputEl.value), 400);
+});
+searchInputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    clearTimeout(searchDebounceTimer);
+    runSearch(searchInputEl.value);
+  }
+});
 
 load();
