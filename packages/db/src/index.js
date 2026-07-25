@@ -871,6 +871,44 @@ async function countBugReportsByReporter(serverId, reporterDiscordId) {
   return prisma.bugReport.count({ where: { serverId, reporterId: user.id } });
 }
 
+// Returns the configured Discord role ids for a command in this server —
+// an empty array means "not overridden", i.e. fall back to the bot's
+// existing internal permission checks exactly as before this feature
+// existed.
+async function getCommandRoleOverride(serverId, commandName) {
+  const rows = await prisma.commandPermission.findMany({ where: { serverId, commandName } });
+  return rows.map((r) => r.discordRoleId);
+}
+
+// All configured overrides for a server, for the dashboard's permission
+// page — grouped by command so the UI doesn't have to.
+async function listCommandPermissions(serverId) {
+  const rows = await prisma.commandPermission.findMany({ where: { serverId } });
+  const byCommand = {};
+  for (const row of rows) {
+    if (!byCommand[row.commandName]) byCommand[row.commandName] = [];
+    byCommand[row.commandName].push(row.discordRoleId);
+  }
+  return byCommand;
+}
+
+// Replace-all semantics for one command: pass the full desired list of
+// allowed Discord role ids (an empty array clears the override,
+// returning that command to the default internal-permission behavior).
+// This is deliberately simpler than incremental add/remove — the UI
+// always shows and submits the complete current state for a command,
+// so there's no drift between what's displayed and what's stored.
+async function setCommandPermissions({ serverId, actingDiscordId, commandName, discordRoleIds }) {
+  const perms = await getEffectivePermissions(serverId, actingDiscordId);
+  if (!perms?.canManageSettings) throw new Error('Not permitted to manage command permissions in this server.');
+
+  await prisma.commandPermission.deleteMany({ where: { serverId, commandName } });
+  for (const discordRoleId of discordRoleIds) {
+    await prisma.commandPermission.create({ data: { serverId, commandName, discordRoleId } });
+  }
+  return getCommandRoleOverride(serverId, commandName);
+}
+
 async function getBugReportByNumber(serverId, bugNumber) {
   return prisma.bugReport.findFirst({ where: { serverId, bugNumber: Number(bugNumber) }, include: { reporter: true } });
 }
@@ -1073,6 +1111,9 @@ module.exports = {
   queryBugReports,
   getBugReportByNumber,
   countBugReportsByReporter,
+  getCommandRoleOverride,
+  listCommandPermissions,
+  setCommandPermissions,
   getBugReportPublic,
   listMyBugReports,
   getBugReport,

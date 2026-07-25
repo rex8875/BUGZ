@@ -62,6 +62,7 @@ model Server {
   auditLog        AuditLogEntry[]
   leaderboard     LeaderboardScore[]
   weeklyScores    WeeklyScore[]
+  commandPermissions CommandPermission[]
 }
 
 // Custom rank defined per-server by the owner. Not hardcoded to
@@ -184,6 +185,23 @@ model BannedMember {
 // Deliberately doesn't log routine bug-status edits; those would be
 // high-frequency noise without much accountability value, and already
 // carry their own updatedAt.
+// A per-server, per-command override letting an owner restrict a
+// command to specific REAL Discord roles (not the bot's own internal
+// Role/rank system) — e.g. only @QA-Lead and @Moderator can run
+// /reset-score. If a command has zero rows here, it's not overridden at
+// all and falls back to the bot's existing internal permission checks,
+// exactly as before this feature existed — this is additive, not a
+// replacement.
+model CommandPermission {
+  id            String @id @default(cuid())
+  serverId      String
+  server        Server @relation(fields: [serverId], references: [id])
+  commandName   String
+  discordRoleId String
+
+  @@unique([serverId, commandName, discordRoleId])
+}
+
 model AuditLogEntry {
   id              String   @id @default(cuid())
   serverId        String

@@ -2,6 +2,7 @@ const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
 const { getUserByDiscordId, getServerByDiscordId, getMembership, createBugReport, countBugReportsByReporter, queryBugReports, permissionsFromRoles, rolesOf } = require('@bugtracker/db');
 const { postNewReportAnnouncement } = require('../lib/announcements');
 const { buildBugListPayload, decodeBugListCustomId } = require('../lib/bugListPayload');
+const { checkCommandAccess } = require('../lib/commandAccess');
 const { buildCoreModal, buildEvidenceModal } = require('../lib/bugReportModals');
 const { saveDraft, getDraft, clearDraft } = require('../lib/bugReportDrafts');
 
@@ -30,6 +31,12 @@ module.exports = {
     if (interaction.isChatInputCommand()) {
       const command = interaction.client.commands.get(interaction.commandName);
       if (!command) return;
+
+      const access = await checkCommandAccess(interaction, interaction.commandName);
+      if (!access.allowed) {
+        return interaction.reply({ content: "You don't have permission to use this command in this server.", ephemeral: true });
+      }
+
       try {
         await command.execute(interaction);
       } catch (err) {

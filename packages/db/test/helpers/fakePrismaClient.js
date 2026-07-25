@@ -120,6 +120,11 @@ const SCHEMA = {
     uniques: ['id'],
     relations: { guestAccess: { type: 'hasMany', model: 'guestAccess', fk: 'shareLinkId' } },
   },
+  commandPermission: {
+    uniques: ['id'],
+    compoundUniques: { serverId_commandName_discordRoleId: ['serverId', 'commandName', 'discordRoleId'] },
+    relations: {},
+  },
   guestAccess: {
     uniques: ['id'],
     compoundUniques: { shareLinkId_userId: ['shareLinkId', 'userId'] },
