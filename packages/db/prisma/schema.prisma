@@ -251,6 +251,11 @@ model LeaderboardScore {
   user      User     @relation(fields: [userId], references: [id])
   points    Int      @default(0)
   updatedAt DateTime @updatedAt
+  // Set when this person leaves (or is removed from) the Discord server;
+  // hides them from the leaderboard without losing their score. Cleared
+  // automatically if they rejoin, or manually by an owner/permitted
+  // person resetting their score.
+  hiddenAt  DateTime?
 
   @@unique([serverId, userId])
 }
@@ -269,6 +274,7 @@ model WeeklyScore {
   user      User     @relation(fields: [userId], references: [id])
   weekStart DateTime
   points    Int      @default(0)
+  hiddenAt  DateTime?
 
   @@unique([serverId, userId, weekStart])
 }

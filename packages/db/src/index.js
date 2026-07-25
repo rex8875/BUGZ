@@ -89,6 +89,43 @@ async function removeMembershipOnLeave(serverId, discordId) {
   await prisma.memberRole.deleteMany({ where: { membershipId: membership.id } });
   await prisma.membership.deleteMany({ where: { id: membership.id } });
   await logAction(serverId, discordId, 'MEMBER_LEFT_DISCORD', {});
+
+  // Hide (don't delete) their leaderboard standing — score is preserved,
+  // just not shown, until they rejoin (automatic) or someone with
+  // permission resets it (manual).
+  const user = await prisma.user.findUnique({ where: { discordId } });
+  if (user) {
+    const hiddenAt = new Date();
+    await prisma.leaderboardScore.updateMany({ where: { serverId, userId: user.id }, data: { hiddenAt } });
+    await prisma.weeklyScore.updateMany({ where: { serverId, userId: user.id }, data: { hiddenAt } });
+  }
+}
+
+// Called on guildMemberAdd — automatically restores leaderboard
+// visibility if this person had a hidden score from a previous leave.
+// Does NOT restore their Membership/roles — that still requires an
+// admin to re-grant, same as any new member — this is specifically
+// about the leaderboard-hide behavior from removeMembershipOnLeave.
+async function restoreLeaderboardVisibilityOnRejoin(serverId, discordId) {
+  const user = await prisma.user.findUnique({ where: { discordId } });
+  if (!user) return;
+  await prisma.leaderboardScore.updateMany({ where: { serverId, userId: user.id }, data: { hiddenAt: null } });
+  await prisma.weeklyScore.updateMany({ where: { serverId, userId: user.id }, data: { hiddenAt: null } });
+}
+
+// The manual override mentioned alongside auto-restore-on-rejoin: an
+// owner/permitted person can reset someone's score outright (points to
+// 0, un-hidden) at any time, independent of whether that person has
+// left or rejoined.
+async function resetLeaderboardScore({ serverId, actingDiscordId, targetDiscordId }) {
+  const perms = await getEffectivePermissions(serverId, actingDiscordId);
+  if (!perms?.canManageSettings) throw new Error('Not permitted to reset scores in this server.');
+
+  const user = await prisma.user.findUnique({ where: { discordId: targetDiscordId } });
+  if (!user) throw new Error('That person has not verified yet.');
+
+  await prisma.leaderboardScore.updateMany({ where: { serverId, userId: user.id }, data: { points: 0, hiddenAt: null } });
+  await prisma.weeklyScore.updateMany({ where: { serverId, userId: user.id }, data: { points: 0, hiddenAt: null } });
 }
 
 async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId, announceChannelId }) {
@@ -632,7 +669,7 @@ async function adjustWeeklyPoints(serverId, userId, weekStart, delta) {
 
 async function getLeaderboard(serverId) {
   return prisma.leaderboardScore.findMany({
-    where: { serverId },
+    where: { serverId, hiddenAt: null },
     include: { user: true },
     orderBy: { points: 'desc' },
   });
@@ -646,7 +683,7 @@ async function getLeaderboard(serverId) {
 async function getWeeklyLeaderboard(serverId, { weekStart } = {}) {
   const week = weekStart ? getWeekStart(weekStart) : getWeekStart(new Date());
   const scores = await prisma.weeklyScore.findMany({
-    where: { serverId, weekStart: week },
+    where: { serverId, weekStart: week, hiddenAt: null },
     include: { user: true },
     orderBy: { points: 'desc' },
   });
@@ -998,6 +1035,8 @@ module.exports = {
   getServerByDiscordId,
   deactivateServer,
   removeMembershipOnLeave,
+  restoreLeaderboardVisibilityOnRejoin,
+  resetLeaderboardScore,
   getServerById,
   updateServerSettings,
   updateServerAppearance,
