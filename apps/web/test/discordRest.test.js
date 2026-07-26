@@ -126,3 +126,36 @@ test('postRetestMessage shows "Unknown" for Triggered by if somehow not provided
     assert.equal(triggeredByField.value, 'Unknown');
   });
 });
+
+test('listGuildRoles fetches from the correct Discord endpoint for the given guild', async () => {
+  delete require.cache[require.resolve('../src/lib/discordRest')];
+  const { listGuildRoles } = require('../src/lib/discordRest');
+
+  await withMockedFetch(
+    [[{ id: 'role-1', name: 'QA Lead', color: 0xff0000, position: 3 }, { id: 'role-2', name: '@everyone', color: 0, position: 0 }]],
+    async (calls) => {
+      const roles = await listGuildRoles('guild-123');
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].url, 'https://discord.com/api/v10/guilds/guild-123/roles');
+      assert.equal(roles.length, 2);
+      assert.equal(roles[0].name, 'QA Lead');
+    },
+  );
+});
+
+test('listApplicationCommands fetches from the correct Discord endpoint using DISCORD_CLIENT_ID', async () => {
+  delete require.cache[require.resolve('../src/lib/discordRest')];
+  const { listApplicationCommands } = require('../src/lib/discordRest');
+
+  const realClientId = process.env.DISCORD_CLIENT_ID;
+  process.env.DISCORD_CLIENT_ID = 'app-999';
+  try {
+    await withMockedFetch([[{ name: 'reset-score', description: "Reset someone's score" }]], async (calls) => {
+      const commands = await listApplicationCommands();
+      assert.equal(calls[0].url, 'https://discord.com/api/v10/applications/app-999/commands');
+      assert.equal(commands[0].name, 'reset-score');
+    });
+  } finally {
+    process.env.DISCORD_CLIENT_ID = realClientId;
+  }
+});

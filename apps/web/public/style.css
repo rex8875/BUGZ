@@ -494,6 +494,111 @@ section h2 { font-family: var(--font-display); font-size: 16px; color: var(--tex
 .role-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .role-card-header strong { font-family: var(--font-display); font-size: 16px; font-weight: 700; }
 
+/* ---- Command Permissions section ---- */
+.cmd-perms-intro {
+  font-size: 13px;
+  color: var(--text-dim);
+  background: var(--ink-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  line-height: 1.6;
+}
+.cmd-perms-intro em { color: var(--text); font-style: normal; font-weight: 600; }
+
+.cmd-perms-summary {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  margin-bottom: 10px;
+}
+
+.cmd-row {
+  background: var(--ink-card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 8px;
+  overflow: hidden;
+  transition: border-color 140ms ease;
+}
+.cmd-row.has-override { border-color: rgba(232,163,61,0.4); }
+
+.cmd-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+.cmd-row-header:hover { background: var(--ink-card-hover); }
+.cmd-row-name { font-family: var(--font-mono); font-weight: 600; font-size: 13.5px; }
+.cmd-row-desc { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.cmd-row-status {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cmd-row-status.default { background: var(--ink-raised); color: var(--text-faint); }
+.cmd-row-status.restricted { background: var(--amber-dim); color: var(--amber-bright); }
+
+.cmd-row-body {
+  display: none;
+  padding: 4px 16px 16px;
+  border-top: 1px dashed var(--line);
+}
+.cmd-row.expanded .cmd-row-body { display: block; }
+.cmd-row.expanded .cmd-row-header { background: var(--ink-card-hover); }
+
+.cmd-role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 6px 12px;
+  margin: 12px 0;
+}
+.cmd-role-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.cmd-role-option:hover { background: var(--ink-raised); }
+.cmd-role-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.15); }
+.cmd-role-option input[type="checkbox"] {
+  appearance: none;
+  width: 14px; height: 14px;
+  border: 1px solid var(--line-bright);
+  border-radius: 4px;
+  background: var(--ink);
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  flex-shrink: 0;
+  margin: 0;
+}
+.cmd-role-option input[type="checkbox"]::before {
+  content: '';
+  width: 7px; height: 7px;
+  border-radius: 2px;
+  background: var(--amber);
+  transform: scale(0);
+  transition: transform 100ms ease;
+}
+.cmd-role-option input[type="checkbox"]:checked { border-color: var(--amber); }
+.cmd-role-option input[type="checkbox"]:checked::before { transform: scale(1); }
+
+.cmd-row-actions { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.cmd-row-actions .hint { margin: 0; }
+.cmd-no-roles-hint { font-size: 12px; color: var(--text-faint); font-style: italic; }
+
 .perm-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

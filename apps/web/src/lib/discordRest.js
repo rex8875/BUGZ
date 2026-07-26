@@ -68,4 +68,21 @@ async function postRetestMessage({ channelId, report, ping, testerPingRoleId, tr
   return { messageId: message.id, threadId: thread.id };
 }
 
-module.exports = { postRetestMessage };
+// Real Discord server roles (id, name, color, position) — powers the
+// role picker on the command-permissions page. Using Discord itself as
+// the source of truth means the picker always shows actual roles that
+// exist right now, never a stale cached copy.
+async function listGuildRoles(guildId) {
+  return discordRequest(`/guilds/${guildId}/roles`);
+}
+
+// The bot's actually-registered slash commands (name + description),
+// straight from Discord's own record of what got deployed via
+// deploy-commands.js. Used by the command-permissions page so its list
+// of restrictable commands can never drift from what's really live —
+// no separate hardcoded list to keep in sync.
+async function listApplicationCommands() {
+  return discordRequest(`/applications/${process.env.DISCORD_CLIENT_ID}/commands`);
+}
+
+module.exports = { postRetestMessage, listGuildRoles, listApplicationCommands };

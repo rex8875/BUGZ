@@ -28,6 +28,16 @@
     </section>
 
     <section style="margin-top:28px;">
+      <h2>Command Permissions</h2>
+      <div class="cmd-perms-intro">
+        By default, every command follows this server's normal role permissions above (the ones set on each role's checklist). You only need to touch anything here if you want a <em>specific command</em> restricted to <em>specific Discord roles</em> — like Dyno's per-command role restrictions — regardless of someone's normal permissions.
+      </div>
+      <div id="cmd-perms-summary" class="cmd-perms-summary"></div>
+      <input type="text" id="cmd-perms-search" class="search-input" placeholder="Search commands…" style="margin-bottom:12px;" />
+      <div id="cmd-perms-list"></div>
+    </section>
+
+    <section style="margin-top:28px;">
       <h2>Members</h2>
       <div class="detail-panel" style="margin-bottom:10px;">
         <div class="field-group">
@@ -51,5 +61,6 @@
     </section>
   </div>
   <script src="/roles.js"></script>
+  <script src="/commandPermissions.js"></script>
 </body>
 </html>

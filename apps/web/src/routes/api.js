@@ -3,6 +3,8 @@ const {
   getServerById,
   getEffectivePermissions,
   queryBugReports,
+  listCommandPermissions,
+  setCommandPermissions,
   getBugReport,
   updateBugReport,
   deleteBugReport,
@@ -29,7 +31,7 @@ const {
   getWeeklyLeaderboard,
   adjustPointsManually,
 } = require('@bugtracker/db');
-const { postRetestMessage } = require('../lib/discordRest');
+const { postRetestMessage, listGuildRoles, listApplicationCommands } = require('../lib/discordRest');
 const requireAuthApi = require('../middleware/requireAuthApi');
 
 const router = express.Router();
@@ -244,6 +246,46 @@ router.patch('/api/servers/:serverId/settings', async (req, res) => {
         testerPingRoleId: req.body.testerPingRoleId,
       }),
     );
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+// ---- Command permissions (Discord-role-based, per-command) ----
+
+router.get('/api/servers/:serverId/command-permissions', async (req, res) => {
+  if (!req.perms.canManageSettings) return res.status(403).json({ error: 'Not permitted to manage command permissions here.' });
+  try {
+    const [discordRoles, discordCommands, overrides] = await Promise.all([
+      listGuildRoles(req.server.discordServerId),
+      listApplicationCommands(),
+      listCommandPermissions(req.server.id),
+    ]);
+    res.json({
+      // @everyone (id === guildId) isn't a useful restriction target —
+      // "everyone" is just the unrestricted default — so it's left out
+      // of the picker entirely rather than shown as a confusing no-op
+      // option.
+      roles: discordRoles
+        .filter((r) => r.id !== req.server.discordServerId)
+        .map((r) => ({ id: r.id, name: r.name, color: r.color })),
+      commands: discordCommands.map((c) => ({ name: c.name, description: c.description })),
+      overrides,
+    });
+  } catch (err) {
+    res.status(502).json({ error: `Could not reach Discord: ${err.message}` });
+  }
+});
+
+router.patch('/api/servers/:serverId/command-permissions/:commandName', async (req, res) => {
+  try {
+    const discordRoleIds = await setCommandPermissions({
+      serverId: req.server.id,
+      actingDiscordId: req.session.discordId,
+      commandName: req.params.commandName,
+      discordRoleIds: req.body.discordRoleIds || [],
+    });
+    res.json({ commandName: req.params.commandName, discordRoleIds });
   } catch (err) {
     res.status(403).json({ error: err.message });
   }
