@@ -20,6 +20,11 @@ function showError(message) {
   const el = document.getElementById('error');
   el.textContent = message;
   el.style.display = message ? 'block' : 'none';
+  if (message) {
+    el.classList.remove('animate__animated', 'animate__headShake');
+    void el.offsetWidth;
+    el.classList.add('animate__animated', 'animate__headShake');
+  }
 }
 
 function escapeHtml(str) {
@@ -79,15 +84,17 @@ function render(scores) {
 
   const medals = ['🥇', '🥈', '🥉'];
   board.innerHTML = scores
-    .map(
-      (s, i) => `
-      <div class="member-row" data-discord-id="${s.user.discordId}">
+    .map((s, i) => {
+      const entranceClass = i < 3 ? 'animate__bounceIn' : 'animate__fadeInUp animate__faster';
+      const delay = i < 3 ? i * 120 : Math.min(i, 15) * 30 + 100;
+      return `
+      <div class="member-row animate__animated ${entranceClass}" data-discord-id="${s.user.discordId}" style="animation-delay:${delay}ms">
         <div style="width:28px;">${medals[i] || i + 1}</div>
         <div style="flex:1;">${escapeHtml(s.user.discordUsername)}</div>
         <div><strong>${s.points}</strong> pt${s.points === 1 ? '' : 's'}</div>
         ${tab === 'all-time' && canAdjust ? '<button data-adjust="-1">-1</button><button data-adjust="1">+1</button>' : ''}
-      </div>`,
-    )
+      </div>`;
+    })
     .join('');
 
   board.querySelectorAll('[data-adjust]').forEach((btn) => {

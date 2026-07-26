@@ -63,7 +63,7 @@
     }
 
     list.innerHTML = filtered
-      .map((cmd) => {
+      .map((cmd, i) => {
         const override = cmdPermsData.overrides[cmd.name] || [];
         const isExpanded = expandedCommand === cmd.name;
         const statusHtml =
@@ -72,7 +72,7 @@
             : `<span class="cmd-row-status default">Default</span>`;
 
         return `
-          <div class="cmd-row ${override.length > 0 ? 'has-override' : ''} ${isExpanded ? 'expanded' : ''}" data-cmd="${escapeHtml(cmd.name)}">
+          <div class="cmd-row animate__animated animate__fadeInUp animate__faster ${override.length > 0 ? 'has-override' : ''} ${isExpanded ? 'expanded' : ''}" data-cmd="${escapeHtml(cmd.name)}" style="animation-delay:${Math.min(i, 15) * 25}ms">
             <div class="cmd-row-header" data-toggle="${escapeHtml(cmd.name)}">
               <div>
                 <div class="cmd-row-name">/${escapeHtml(cmd.name)}</div>
@@ -80,7 +80,7 @@
               </div>
               ${statusHtml}
             </div>
-            <div class="cmd-row-body">${isExpanded ? commandBodyHtml(cmd, override) : ''}</div>
+            <div class="cmd-row-body">${isExpanded ? `<div class="animate__animated animate__fadeIn animate__faster">${commandBodyHtml(cmd, override)}</div>` : ''}</div>
           </div>`;
       })
       .join('');

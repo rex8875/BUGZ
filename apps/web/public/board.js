@@ -37,6 +37,11 @@ function showError(message) {
   const el = document.getElementById('error');
   el.textContent = message;
   el.style.display = message ? 'block' : 'none';
+  if (message) {
+    el.classList.remove('animate__animated', 'animate__headShake');
+    void el.offsetWidth; // force reflow so the animation replays even for back-to-back errors
+    el.classList.add('animate__animated', 'animate__headShake');
+  }
 }
 
 async function load() {
@@ -244,7 +249,7 @@ function renderList() {
     .map((r, i) => {
       const selected = r.id === state.selectedId;
       return `
-        <div class="report-row ${selected ? 'selected' : ''}" data-report-id="${r.id}" style="animation-delay:${Math.min(i, 12) * 22}ms">
+        <div class="report-row animate__animated animate__fadeInUp animate__faster ${selected ? 'selected' : ''}" data-report-id="${r.id}" style="animation-delay:${Math.min(i, 12) * 35}ms">
           <div class="title">${escapeHtml(r.title)}</div>
           ${priorityStatusTagsHtml(r)}
           ${selected ? quickActionsHtml(r) : ''}
@@ -295,7 +300,7 @@ function renderDetail() {
   }
 
   area.innerHTML = `
-    <div class="detail-panel">
+    <div class="detail-panel animate__animated animate__fadeInDown animate__faster">
       <h2>${escapeHtml(report.title)} ${state.permissions.canEditReports ? '<button data-edit-title>Edit title</button>' : ''}</h2>
       <div class="detail-meta">reported by ${escapeHtml(report.reporter?.discordUsername || 'unknown')} · ${escapeHtml(report.device || 'unspecified device')} · ${new Date(report.createdAt).toLocaleDateString()}</div>
       <div class="detail-tags">${priorityStatusTagsHtml(report)}</div>

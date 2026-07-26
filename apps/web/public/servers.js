@@ -38,7 +38,7 @@ function renderGrid() {
     return;
   }
 
-  list.innerHTML = `<div class="servers-grid">${servers.map((s) => serverCardHtml(s)).join('')}</div>`;
+  list.innerHTML = `<div class="servers-grid">${servers.map((s, i) => serverCardHtml(s, i)).join('')}</div>`;
 
   servers.forEach((s) => {
     if (s.permissions.canManageSettings) {
@@ -56,13 +56,13 @@ function renderGrid() {
   });
 }
 
-function serverCardHtml(s) {
-  let bg = '';
+function serverCardHtml(s, i = 0) {
+  let bgCss = '';
   if (s.backgroundStyle) {
     if (s.backgroundStyle.startsWith('linear-gradient')) {
-      bg = `style="background-image:${s.backgroundStyle};"`;
+      bgCss = `background-image:${s.backgroundStyle};`;
     } else {
-      bg = `style="background-color:${s.backgroundStyle};"`;
+      bgCss = `background-color:${s.backgroundStyle};`;
     }
   }
   const avatar = s.iconUrl
@@ -71,7 +71,7 @@ function serverCardHtml(s) {
 
   return `
     <div class="server-card-outer">
-      <a class="server-card" href="/dashboard/${s.id}" ${bg}>
+      <a class="server-card animate__animated animate__fadeInUp animate__faster" href="/dashboard/${s.id}" style="${bgCss}animation-delay:${Math.min(i, 12) * 40}ms">
         ${s.permissions.canManageSettings ? `<button class="server-customize-btn" id="customize-btn-${s.id}">Customize</button>` : ''}
         <div class="server-card-body">
           ${avatar}
@@ -87,7 +87,7 @@ function renderCustomizePanel(s) {
   const host = document.getElementById(`appearance-panel-${s.id}`);
   if (!host) return;
   host.innerHTML = `
-    <div class="appearance-panel">
+    <div class="appearance-panel animate__animated animate__fadeInDown animate__faster">
       <h3>Background — ${escapeHtml(s.name)}</h3>
       <div id="picker-mount-${s.id}"></div>
       <div class="quick-actions" style="border:none;margin-top:14px;padding-top:0;">

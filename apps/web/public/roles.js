@@ -33,6 +33,11 @@ function showError(message) {
   const el = document.getElementById('error');
   el.textContent = message;
   el.style.display = message ? 'block' : 'none';
+  if (message) {
+    el.classList.remove('animate__animated', 'animate__headShake');
+    void el.offsetWidth;
+    el.classList.add('animate__animated', 'animate__headShake');
+  }
 }
 
 function escapeHtml(str) {
