@@ -284,11 +284,27 @@ function renderList() {
   });
 }
 
+function isSafeLinkUrl(value) {
+  if (typeof value !== 'string' || value.trim() === '') return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 function evidenceLinkHtml(fileUrl, link) {
   const url = fileUrl || link;
-  return url
-    ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="raw-link" title="${escapeHtml(url)}">${escapeHtml(url)}</a>`
-    : '<span class="hint">None</span>';
+  if (!url) return '<span class="hint">None</span>';
+  if (!isSafeLinkUrl(url)) {
+    // Defense in depth: even if a non-http(s) value somehow made it into
+    // the database (e.g. from before this validation existed), it is
+    // shown as plain escaped text, never as a clickable href — escaping
+    // alone does not stop a javascript: URL from executing on click.
+    return `<span class="hint" title="This link isn't a valid http(s) URL, so it isn't clickable.">${escapeHtml(url)}</span>`;
+  }
+  return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="raw-link" title="${escapeHtml(url)}">${escapeHtml(url)}</a>`;
 }
 
 function renderDetail() {

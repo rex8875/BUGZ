@@ -707,6 +707,24 @@ async function adjustPointsManually({ serverId, actingDiscordId, targetDiscordId
 
 // ---- Bug reports -------------------------------------------------------
 
+// Rejects dangerous URI schemes (javascript:, data:, vbscript:, etc.) in
+// user-submitted links. This matters specifically because these values
+// get rendered as a real, clickable <a href> on the dashboard
+// (evidenceLinkHtml in board.js) — HTML-escaping alone does NOT stop a
+// "javascript:" URL from executing when clicked, since escaping only
+// protects against markup injection, not dangerous URI schemes. Found
+// during an extensive security re-audit; evidence/F9 links previously
+// had zero format validation anywhere.
+function isSafeLinkUrl(value) {
+  if (typeof value !== 'string' || value.trim() === '') return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 async function createBugReport(serverId, reporterDiscordId, data) {
   if (await isBanned(serverId, reporterDiscordId)) {
     throw new Error('You are banned from this server.');
@@ -730,6 +748,16 @@ async function createBugReport(serverId, reporterDiscordId, data) {
   const reportData = {};
   for (const field of allowedFields) {
     if (data[field] !== undefined) reportData[field] = data[field];
+  }
+
+  // Only the *Link fields (typed by hand in the Discord modal) need this
+  // check — the *FileUrl fields, if ever used again, would come from a
+  // trusted upload pipeline rather than raw user text.
+  if (reportData.evidenceLink !== undefined && !isSafeLinkUrl(reportData.evidenceLink)) {
+    throw new Error('Evidence link must be a valid http:// or https:// URL.');
+  }
+  if (reportData.f9Link !== undefined && !isSafeLinkUrl(reportData.f9Link)) {
+    throw new Error('F9 link must be a valid http:// or https:// URL.');
   }
 
   // Atomic increment on a single row — Prisma translates { increment: 1 }
@@ -1107,6 +1135,7 @@ module.exports = {
   listShareLinks,
   redeemShareLink,
   createBugReport,
+  isSafeLinkUrl,
   searchBugReports,
   queryBugReports,
   getBugReportByNumber,

@@ -201,6 +201,37 @@ test('the search bar treats an unrecognized "word:value" token as free text rath
   assert.match(decodeURIComponent(searchCall).replace(/\+/g, ' '), /search=ratio:high crash/);
 });
 
+test('board.html never renders a javascript: (or other non-http) evidence link as a clickable href, even if it somehow reached the DOM', async () => {
+  const dom = await renderPage({
+    htmlFile: 'board.html',
+    scripts: ['board.js'],
+    fetchImpl: async (url) => {
+      if (String(url).includes('/me')) {
+        return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'Alpha', iconUrl: null, backgroundStyle: null }) };
+      }
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
+      return {
+        ok: true, status: 200,
+        json: async () => [
+          {
+            id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW',
+            reporter: { discordUsername: 'tester1' }, device: 'PC', createdAt: new Date().toISOString(),
+            evidenceLink: 'javascript:alert(document.cookie)', f9Link: null,
+          },
+        ],
+      };
+    },
+  });
+  const doc = dom.window.document;
+  const row = doc.querySelector('.report-row');
+  row.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  const link = doc.querySelector('a.raw-link');
+  assert.equal(link, null, 'a javascript: URL must never render as a clickable <a> element');
+  assert.match(doc.getElementById('detail-area').textContent, /javascript:alert/, 'the raw text should still be visible (just not clickable), so nothing is silently hidden');
+});
+
 test('board.html shows the raw evidence/F9 URL as visible text, not a generic "View" link', async () => {
   const dom = await renderPage({
     htmlFile: 'board.html',
