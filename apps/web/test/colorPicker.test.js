@@ -37,6 +37,26 @@ test('isValidHex accepts 3 and 6 digit hex, rejects garbage', () => {
   assert.equal(isValidHex('javascript:alert(1)'), false);
 });
 
+test('isValidHex rejects a battery of malformed inputs a real user might type', () => {
+  assert.equal(isValidHex('e8a33d'), false, 'missing # prefix');
+  assert.equal(isValidHex('#e8a3'), false, '4-digit is not valid CSS hex shorthand');
+  assert.equal(isValidHex('#e8a33'), false, '5-digit');
+  assert.equal(isValidHex('#gggggg'), false, 'invalid hex characters g-z');
+  assert.equal(isValidHex('#E8A33D'), true, 'uppercase should still be accepted (case-insensitive)');
+  assert.equal(isValidHex(' #e8a33d '), false, 'whitespace-padded');
+  assert.equal(isValidHex('red'), false, 'CSS named color, not hex');
+  assert.equal(isValidHex('rgb(232,163,61)'), false, 'rgb() syntax, not hex');
+});
+
+test('hsvToRgb stays within valid 0-255 RGB range across boundary and out-of-range hue values', () => {
+  for (const h of [0, 359.999, 360, -1, 720]) {
+    const [r, g, b] = hsvToRgb(((h % 360) + 360) % 360, 1, 1);
+    for (const channel of [r, g, b]) {
+      assert.ok(channel >= 0 && channel <= 255, `channel out of range for hue=${h}: ${channel}`);
+    }
+  }
+});
+
 test('the picker only ever produces values the server-side validator accepts', () => {
   // Mirrors packages/db's isValidBackgroundStyle regexes so the client
   // and server never disagree about what's a legal background.

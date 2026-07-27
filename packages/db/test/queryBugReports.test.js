@@ -107,6 +107,16 @@ test('queryBugReports still shows reports from a reporter who has since left the
   assert.equal(result.totalCount, 2, 'leaving the server must not remove their reports from list views');
 });
 
+test('queryBugReports never crashes on malformed or malicious date tokens, and simply does not filter on them', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const server = await setupServerWithReports(db, 1);
+  const malformed = ['notadate', '2024-13-45', '', 'DROP TABLE reports', '../../etc/passwd', '9999-99-99'];
+  for (const bad of malformed) {
+    const result = await db.queryBugReports(server.id, { on: bad, pageSize: 10 });
+    assert.equal(result.totalCount, 1, `on:"${bad}" should not crash and should not filter anything out`);
+  }
+});
+
 test('getBugReportByNumber finds a report by its per-server sequential number', async () => {
   const { db } = loadDbWithFakePrisma();
   const server = await setupServerWithReports(db, 3);
