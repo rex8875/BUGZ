@@ -930,8 +930,16 @@ async function setCommandPermissions({ serverId, actingDiscordId, commandName, d
   const perms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!perms?.canManageSettings) throw new Error('Not permitted to manage command permissions in this server.');
 
+  // Dedupe (and drop empty/falsy entries) before writing — without this,
+  // a request containing the same role id twice (e.g. a malformed
+  // client request, or a direct API call bypassing the dashboard's own
+  // checkbox-driven Set) would crash on the second insert, since
+  // (serverId, commandName, discordRoleId) is a unique constraint. A
+  // duplicate role id is meaningless anyway — "allowed" isn't a count.
+  const uniqueRoleIds = [...new Set(discordRoleIds.filter(Boolean))];
+
   await prisma.commandPermission.deleteMany({ where: { serverId, commandName } });
-  for (const discordRoleId of discordRoleIds) {
+  for (const discordRoleId of uniqueRoleIds) {
     await prisma.commandPermission.create({ data: { serverId, commandName, discordRoleId } });
   }
   return getCommandRoleOverride(serverId, commandName);

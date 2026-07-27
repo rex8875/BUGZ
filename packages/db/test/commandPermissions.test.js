@@ -63,6 +63,38 @@ test('re-setting a command replaces the old list entirely, not merges with it', 
   assert.deepEqual(await db.getCommandRoleOverride(server.id, 'reset-score'), ['role-c']);
 });
 
+test('submitting the same Discord role id more than once does not crash — duplicates are deduped', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServer(db);
+  const result = await db.setCommandPermissions({
+    serverId: server.id,
+    actingDiscordId: 'owner1',
+    commandName: 'reset-score',
+    discordRoleIds: ['role-a', 'role-a', 'role-a', 'role-b'],
+  });
+  assert.deepEqual(result.sort(), ['role-a', 'role-b']);
+});
+
+test('empty-string, null, and undefined entries in discordRoleIds are filtered out rather than stored or crashing', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServer(db);
+  const result = await db.setCommandPermissions({
+    serverId: server.id,
+    actingDiscordId: 'owner1',
+    commandName: 'reset-score',
+    discordRoleIds: ['', 'role-b', null, undefined],
+  });
+  assert.deepEqual(result, ['role-b']);
+});
+
+test('re-saving the exact same override twice in a row is idempotent, not an error', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServer(db);
+  await db.setCommandPermissions({ serverId: server.id, actingDiscordId: 'owner1', commandName: 'bug', discordRoleIds: ['role-z'] });
+  const second = await db.setCommandPermissions({ serverId: server.id, actingDiscordId: 'owner1', commandName: 'bug', discordRoleIds: ['role-z'] });
+  assert.deepEqual(second, ['role-z']);
+});
+
 test('a Tester (no canManageSettings) cannot configure command permissions', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServer(db);
