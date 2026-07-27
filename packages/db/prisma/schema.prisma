@@ -47,6 +47,14 @@ model Server {
   // Separate from retestChannelId (retests) — a server may want these
   // in different channels.
   announceChannelId String?
+  // The one Discord role (if set) whose holders get full access to
+  // every command and every internal permission — checked LIVE against
+  // Discord on each check, never synced into a separate internal role
+  // grant. This is deliberately the same "linked directly to a real
+  // server role" model as the per-command CommandPermission overrides,
+  // just as a single all-commands shortcut instead of configuring each
+  // command individually.
+  adminRoleId       String?
 
   // False once the bot is kicked/removed from this Discord server. Data
   // is kept (reports, roles, members) — only dashboard visibility is

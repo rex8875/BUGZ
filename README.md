@@ -95,6 +95,10 @@ test suite for what that guarantees.
   announcements post (separate channel from retest, if you want)
 - `/set-tester-role @role` — which role gets pinged by "Ping testers" (falls
   back to mentioning the individual reporter if no role is set)
+- `/set-admin-role @role` — give an *existing* Discord role (your real
+  server's own role, e.g. your current `@Tester` or `@Moderator` role —
+  not a separate bot-specific role) full access to every command and
+  every permission, checked live against Discord on every use
 
 ### Command permissions (Discord-role-based, per-command)
 
@@ -102,10 +106,26 @@ By default every command follows the bot's own internal Role/rank
 permission system (managed on the dashboard's Roles page). On top of
 that, an owner can restrict any *specific* command to *specific real
 Discord roles* — independent of the bot's internal roles — from the
-dashboard's "Command Permissions" section (Roles page). Real Discord
-Administrator permission, or the bot's own `canManageSettings`, always
-bypasses a restriction, so nobody who can fix a misconfiguration can
-lock themselves out of doing so.
+dashboard's "Command Permissions" section (Roles page), or grant one
+role blanket access to everything at once via `/set-admin-role`.
+
+Both of these are checked **live against Discord**, not synced into a
+separate internal role grant — this matches how Dyno links permissions
+directly to your server's own roles rather than requiring a parallel
+role-assignment step. Concretely: `/set-admin-role` stores only the
+Discord role id; `getEffectivePermissions()` calls Discord's API to
+check whether the acting person currently holds that role every time it
+matters, and fails closed (denies) if Discord is unreachable. Remove
+the role in Discord and access is gone on the very next check — nothing
+to clean up on our side. (As an optimization, this live check is
+skipped entirely for anyone who already has full permissions through
+the ordinary internal role system, and skipped for every server that
+hasn't configured an admin role at all — so this adds zero overhead
+unless a server actually uses the feature.)
+
+Real Discord Administrator permission, or the bot's own
+`canManageSettings`, always bypasses a per-command restriction, so
+nobody who can fix a misconfiguration can lock themselves out of doing so.
 
 ### Dashboard features
 

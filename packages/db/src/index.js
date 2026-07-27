@@ -128,7 +128,7 @@ async function resetLeaderboardScore({ serverId, actingDiscordId, targetDiscordI
   await prisma.weeklyScore.updateMany({ where: { serverId, userId: user.id }, data: { points: 0, hiddenAt: null } });
 }
 
-async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId, announceChannelId }) {
+async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId, announceChannelId, adminRoleId }) {
   const perms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
 
@@ -136,6 +136,7 @@ async function updateServerSettings({ serverId, actingDiscordId, retestChannelId
   if (retestChannelId !== undefined) data.retestChannelId = retestChannelId;
   if (testerPingRoleId !== undefined) data.testerPingRoleId = testerPingRoleId;
   if (announceChannelId !== undefined) data.announceChannelId = announceChannelId;
+  if (adminRoleId !== undefined) data.adminRoleId = adminRoleId;
 
   return prisma.server.update({ where: { id: serverId }, data });
 }
@@ -327,12 +328,72 @@ function permissionsFromShareLink(shareLink) {
 // one, falls back to checking for an unrevoked share-link grant. Either
 // way the caller gets the same shape back, so it doesn't need to care
 // which path the access came from.
+const DISCORD_API = 'https://discord.com/api/v10';
+
+// Every permission flag true — what holding the server's designated
+// admin Discord role grants. Kept as a plain object literal (not
+// derived from permissionsFromRoles) so its shape is easy to eyeball
+// against that function's return shape and keep in sync by hand.
+const FULL_PERMISSIONS = {
+  source: 'admin-role',
+  canSubmitBugs: true,
+  canViewDashboard: true,
+  canManageBugs: true,
+  canPingTesters: true,
+  canArchive: true,
+  canEditReports: true,
+  canDeleteReports: true,
+  canShareDashboard: true,
+  canKickMembers: true,
+  canBanMembers: true,
+  canManageRoles: true,
+  canManageSettings: true,
+};
+
+// Checks LIVE against Discord's API whether a person currently holds a
+// specific role — no local caching, no separate internal role grant.
+// This is intentionally the single source of truth for the admin-role
+// bypass: if the role is removed from them in Discord, the very next
+// permission check reflects that immediately, with nothing to clean up
+// on our side. Fails closed (false) on any error — a Discord outage or
+// rate limit should never accidentally grant access.
+async function memberHasDiscordRole(discordServerId, discordId, roleId) {
+  try {
+    const res = await fetch(`${DISCORD_API}/guilds/${discordServerId}/members/${discordId}`, {
+      headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
+    });
+    if (!res.ok) return false; // includes 404 (not a member / left the server)
+    const member = await res.json();
+    return Array.isArray(member.roles) && member.roles.includes(roleId);
+  } catch {
+    return false;
+  }
+}
+
 async function getEffectivePermissions(serverId, discordId) {
   const server = await prisma.server.findUnique({ where: { id: serverId } });
   if (!server || !server.isActive) return null;
 
   const membership = await getMembership(serverId, discordId);
-  if (membership) return permissionsFromRoles(rolesOf(membership));
+  const internalPerms = membership ? permissionsFromRoles(rolesOf(membership)) : null;
+
+  // Already maximally privileged through the normal internal role
+  // system — skip the live Discord round-trip entirely, both for speed
+  // and to avoid burning a Discord API call on every single permission
+  // check for the people who don't need this feature at all.
+  if (internalPerms?.canManageSettings) return internalPerms;
+
+  // The admin-role bypass: checked fresh against Discord every time,
+  // never stored locally. If it's held, it wins outright — overriding
+  // whatever more limited internal role (or none at all) this person
+  // might separately have, since holding the role is meant to mean
+  // full access, full stop.
+  if (server.adminRoleId) {
+    const hasAdminRole = await memberHasDiscordRole(server.discordServerId, discordId, server.adminRoleId);
+    if (hasAdminRole) return FULL_PERMISSIONS;
+  }
+
+  if (internalPerms) return internalPerms;
 
   const user = await prisma.user.findUnique({ where: { discordId } });
   if (!user) return null;
@@ -1124,6 +1185,7 @@ module.exports = {
   effectiveRank,
   permissionsFromRoles,
   getEffectivePermissions,
+  memberHasDiscordRole,
   listAccessibleServers,
   grantRole,
   revokeRole,
