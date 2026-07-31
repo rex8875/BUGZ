@@ -1,5 +1,5 @@
 const { SlashCommandBuilder, EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { getServerByDiscordId, getMembership, permissionsFromRoles, rolesOf } = require('@bugtracker/db');
+const { getServerByDiscordId, getEffectivePermissions } = require('@bugtracker/db');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -12,8 +12,7 @@ module.exports = {
       return interaction.reply({ content: 'This server is not set up yet.', ephemeral: true });
     }
 
-    const membership = await getMembership(server.id, interaction.user.id);
-    const perms = membership ? permissionsFromRoles(rolesOf(membership)) : null;
+    const perms = await getEffectivePermissions(server.id, interaction.user.id);
     if (!perms?.canManageSettings) {
       return interaction.reply({ content: "You don't have permission to do this.", ephemeral: true });
     }

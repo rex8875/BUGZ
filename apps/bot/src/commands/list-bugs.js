@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getServerByDiscordId, getMembership, queryBugReports } = require('@bugtracker/db');
+const { getServerByDiscordId, getEffectivePermissions, queryBugReports } = require('@bugtracker/db');
 const { buildBugListPayload } = require('../lib/bugListPayload');
 
 module.exports = {
@@ -26,9 +26,9 @@ module.exports = {
     const server = await getServerByDiscordId(interaction.guildId);
     if (!server) return interaction.reply({ content: 'This server is not set up yet.', ephemeral: true });
 
-    const membership = await getMembership(server.id, interaction.user.id);
-    if (!membership) {
-      return interaction.reply({ content: "You're not a member of this server's tester program.", ephemeral: true });
+    const perms = await getEffectivePermissions(server.id, interaction.user.id);
+    if (!perms?.canViewDashboard) {
+      return interaction.reply({ content: "You don't have permission to view bug reports in this server.", ephemeral: true });
     }
 
     const search = interaction.options.getString('search');

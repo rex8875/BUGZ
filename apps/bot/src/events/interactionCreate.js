@@ -1,5 +1,5 @@
 const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { getUserByDiscordId, getServerByDiscordId, getMembership, createBugReport, countBugReportsByReporter, queryBugReports, permissionsFromRoles, rolesOf } = require('@bugtracker/db');
+const { getUserByDiscordId, getServerByDiscordId, getEffectivePermissions, createBugReport, countBugReportsByReporter, queryBugReports } = require('@bugtracker/db');
 const { postNewReportAnnouncement } = require('../lib/announcements');
 const { buildBugListPayload, decodeBugListCustomId } = require('../lib/bugListPayload');
 const { checkCommandAccess } = require('../lib/commandAccess');
@@ -53,12 +53,13 @@ module.exports = {
         const server = await getServerByDiscordId(interaction.guildId);
         if (!server) return interaction.update({ content: 'This server is not set up yet.', embeds: [], components: [] });
 
-        // Re-check tester-program membership on every page click, not
-        // just when the command was first run — a stale button in an
-        // old ephemeral message shouldn't outlive someone's access.
-        const membership = await getMembership(server.id, interaction.user.id);
-        if (!membership) {
-          return interaction.update({ content: "You're not a member of this server's tester program.", embeds: [], components: [] });
+        // Re-check permission on every page click, not just when the
+        // command was first run — a stale button in an old ephemeral
+        // message shouldn't outlive someone's access, and their access
+        // is checked live against Discord anyway.
+        const perms = await getEffectivePermissions(server.id, interaction.user.id);
+        if (!perms?.canViewDashboard) {
+          return interaction.update({ content: "You don't have permission to view bug reports in this server.", embeds: [], components: [] });
         }
 
         let queryResult, title, emptyMessage;
@@ -104,8 +105,7 @@ module.exports = {
         }
 
         const server = await getServerByDiscordId(interaction.guildId);
-        const membership = server ? await getMembership(server.id, interaction.user.id) : null;
-        const perms = membership ? permissionsFromRoles(rolesOf(membership)) : null;
+        const perms = server ? await getEffectivePermissions(server.id, interaction.user.id) : null;
         if (!perms?.canSubmitBugs) {
           return interaction.reply({
             content: "You don't have permission to report bugs in this server.",

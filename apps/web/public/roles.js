@@ -10,13 +10,15 @@ const PERMISSION_FIELDS = [
   ['canEditReports', 'Edit report content'],
   ['canDeleteReports', 'Delete reports'],
   ['canShareDashboard', 'Share dashboard'],
-  ['canKickMembers', 'Kick members'],
   ['canBanMembers', 'Ban members'],
   ['canManageRoles', 'Manage roles'],
   ['canManageSettings', 'Manage settings'],
 ];
 
-let roles = [];
+let discordRoles = [];
+let configuredByRoleId = {}; // discordRoleId -> RolePermission row
+let roleSearchQuery = '';
+let expandedRoleId = null;
 
 async function api(path, options = {}) {
   const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
@@ -44,10 +46,15 @@ function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+function roleColorCss(color) {
+  if (!color) return '#99a1b3';
+  return '#' + color.toString(16).padStart(6, '0');
+}
+
 function permGridHtml(prefix, current = {}) {
   return PERMISSION_FIELDS.map(
     ([key, label]) =>
-      `<label><input type="checkbox" data-perm="${key}" id="${prefix}-${key}" ${current[key] ? 'checked' : ''}/> ${label}</label>`,
+      `<label class="cmd-role-option"><input type="checkbox" data-perm="${key}" id="${prefix}-${key}" ${current[key] ? 'checked' : ''}/> ${label}</label>`,
   ).join('');
 }
 
@@ -61,16 +68,11 @@ function readPermGrid(container) {
 
 async function load() {
   try {
-    document.getElementById('new-role-perms').innerHTML = permGridHtml('new');
-
-    roles = await api(`/api/servers/${serverId}/roles`);
-    renderRoles();
-    document.getElementById('new-member-role').innerHTML = roles
-      .map((r) => `<option value="${r.id}">${escapeHtml(r.name)}</option>`)
-      .join('');
-
-    const members = await api(`/api/servers/${serverId}/members`);
-    renderMembers(members);
+    const rolePermsData = await api(`/api/servers/${serverId}/role-permissions`);
+    discordRoles = rolePermsData.roles;
+    configuredByRoleId = {};
+    for (const row of rolePermsData.configured) configuredByRoleId[row.discordRoleId] = row;
+    renderRoleList();
 
     const banned = await api(`/api/servers/${serverId}/banned`);
     renderBanned(banned);
@@ -82,150 +84,119 @@ async function load() {
   }
 }
 
-document.getElementById('add-member-btn').addEventListener('click', async () => {
-  const discordId = document.getElementById('new-member-id').value.trim();
-  const roleId = document.getElementById('new-member-role').value;
-  if (!discordId) return showError('Enter a Discord ID.');
+function renderRoleList() {
+  const configuredCount = Object.keys(configuredByRoleId).length;
+  document.getElementById('role-perms-summary').textContent =
+    configuredCount === 0
+      ? `None of your ${discordRoles.length} Discord roles have bot permissions configured yet.`
+      : `${configuredCount} of ${discordRoles.length} Discord role${discordRoles.length === 1 ? '' : 's'} configured.`;
 
-  try {
-    await api(`/api/servers/${serverId}/members/${discordId}/roles/${roleId}/grant`, { method: 'POST' });
-    document.getElementById('new-member-id').value = '';
-    await load();
-  } catch (err) {
-    showError(err.message);
+  const filtered = discordRoles.filter((r) => r.name.toLowerCase().includes(roleSearchQuery));
+  const list = document.getElementById('role-list');
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="hint">No roles match your search.</div>';
+    return;
   }
-});
 
-function renderRoles() {
-  document.getElementById('role-list').innerHTML = roles
-    .map(
-      (role) => `
-      <div class="role-card" data-role-id="${role.id}">
-        <div class="role-card-header">
-          <strong>${escapeHtml(role.name)}</strong>
-          <label class="hint" style="display:flex; align-items:center; gap:4px;">rank <input type="number" data-rank-input value="${role.rank}" style="width:60px;" /></label>
-        </div>
-        <div class="perm-grid">${permGridHtml(`role-${role.id}`, role)}</div>
-        <div style="margin-top:10px; display:flex; gap:8px;">
-          <button data-save-role="${role.id}">Save</button>
-          <button data-delete-role="${role.id}">Delete</button>
-        </div>
-      </div>`,
-    )
-    .join('');
-
-  document.querySelectorAll('[data-save-role]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const card = btn.closest('[data-role-id]');
-      const perms = readPermGrid(card);
-      const rank = parseInt(card.querySelector('[data-rank-input]').value, 10);
-      if (!Number.isNaN(rank)) perms.rank = rank;
-      try {
-        await api(`/api/servers/${serverId}/roles/${btn.dataset.saveRole}`, { method: 'PATCH', body: JSON.stringify(perms) });
-        await load();
-      } catch (err) {
-        showError(err.message);
-      }
-    });
-  });
-
-  document.querySelectorAll('[data-delete-role]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      if (!confirm('Delete this role? Members holding it must be reassigned first.')) return;
-      try {
-        await api(`/api/servers/${serverId}/roles/${btn.dataset.deleteRole}`, { method: 'DELETE' });
-        await load();
-      } catch (err) {
-        showError(err.message);
-      }
-    });
-  });
-}
-
-document.getElementById('create-role-btn').addEventListener('click', async () => {
-  const name = document.getElementById('new-role-name').value.trim();
-  const rank = parseInt(document.getElementById('new-role-rank').value, 10);
-  const perms = readPermGrid(document.getElementById('new-role-perms'));
-
-  if (!name || Number.isNaN(rank)) return showError('Role needs a name and a numeric rank.');
-
-  try {
-    await api(`/api/servers/${serverId}/roles`, { method: 'POST', body: JSON.stringify({ name, rank, ...perms }) });
-    document.getElementById('new-role-name').value = '';
-    document.getElementById('new-role-rank').value = '';
-    await load();
-  } catch (err) {
-    showError(err.message);
-  }
-});
-
-// Each member shows a checkbox per server role — checked if they hold it.
-// Toggling grants or revokes that ONE role immediately, leaving every
-// other role they hold untouched, matching real Discord role behavior.
-function renderMembers(members) {
-  document.getElementById('member-list').innerHTML = members
-    .map((m) => {
-      const heldRoleIds = new Set(m.roles.map((mr) => mr.roleId));
-      const roleChips = roles
-        .map(
-          (r) => `
-          <label style="display:inline-flex; align-items:center; gap:3px; font-size:12px; margin-right:8px;">
-            <input type="checkbox" data-role-toggle="${r.id}" ${heldRoleIds.has(r.id) ? 'checked' : ''} /> ${escapeHtml(r.name)}
-          </label>`,
-        )
-        .join('');
+  list.innerHTML = filtered
+    .map((role) => {
+      const configured = configuredByRoleId[role.id];
+      const enabledCount = configured ? PERMISSION_FIELDS.filter(([key]) => configured[key]).length : 0;
+      const isExpanded = expandedRoleId === role.id;
+      const statusHtml =
+        enabledCount > 0
+          ? `<span class="cmd-row-status restricted">${enabledCount} permission${enabledCount === 1 ? '' : 's'} enabled</span>`
+          : `<span class="cmd-row-status default">No bot access</span>`;
 
       return `
-      <div class="member-row" data-discord-id="${m.user.discordId}" style="flex-wrap:wrap;">
-        <div style="flex:1; min-width:140px;">${escapeHtml(m.user.discordUsername)}</div>
-        <div style="flex-basis:100%; margin:4px 0;">${roleChips}</div>
-        <button data-kick>Kick</button>
-        <button data-ban>Ban</button>
-      </div>`;
+        <div class="cmd-row animate__animated animate__fadeIn animate__faster ${enabledCount > 0 ? 'has-override' : ''} ${isExpanded ? 'expanded' : ''}" data-role-id="${role.id}">
+          <div class="cmd-row-header" data-toggle-role="${role.id}">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="cmd-role-dot" style="background:${roleColorCss(role.color)};"></span>
+              <div class="cmd-row-name">${escapeHtml(role.name)}</div>
+            </div>
+            ${statusHtml}
+          </div>
+          <div class="cmd-row-body">${isExpanded ? roleBodyHtml(role, configured || {}) : ''}</div>
+        </div>`;
     })
     .join('');
 
-  document.querySelectorAll('[data-role-toggle]').forEach((checkbox) => {
-    checkbox.addEventListener('change', async () => {
-      const discordId = checkbox.closest('[data-discord-id]').dataset.discordId;
-      const roleId = checkbox.dataset.roleToggle;
-      const action = checkbox.checked ? 'grant' : 'revoke';
-      try {
-        await api(`/api/servers/${serverId}/members/${discordId}/roles/${roleId}/${action}`, { method: 'POST' });
-        await load();
-      } catch (err) {
-        checkbox.checked = !checkbox.checked; // revert the visual toggle since the change didn't actually apply
-        showError(err.message);
-      }
+  list.querySelectorAll('[data-toggle-role]').forEach((el) => {
+    el.addEventListener('click', () => {
+      expandedRoleId = expandedRoleId === el.dataset.toggleRole ? null : el.dataset.toggleRole;
+      renderRoleList();
     });
   });
 
-  document.querySelectorAll('[data-kick]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const discordId = btn.closest('[data-discord-id]').dataset.discordId;
-      if (!confirm('Kick this member? They can be re-added later.')) return;
-      try {
-        await api(`/api/servers/${serverId}/members/${discordId}/kick`, { method: 'POST' });
-        await load();
-      } catch (err) {
-        showError(err.message);
-      }
-    });
-  });
-
-  document.querySelectorAll('[data-ban]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const discordId = btn.closest('[data-discord-id]').dataset.discordId;
-      const reason = prompt('Reason for ban (optional)') || undefined;
-      try {
-        await api(`/api/servers/${serverId}/members/${discordId}/ban`, { method: 'POST', body: JSON.stringify({ reason }) });
-        await load();
-      } catch (err) {
-        showError(err.message);
-      }
-    });
-  });
+  if (expandedRoleId) wireExpandedRoleControls(expandedRoleId);
 }
+
+function roleBodyHtml(role, current) {
+  return `
+    <div class="perm-grid">${permGridHtml(`role-${role.id}`, current)}</div>
+    <div class="cmd-row-actions">
+      <button class="primary" data-save-role="${role.id}">Save</button>
+      <button data-clear-role="${role.id}">Reset to default (no access)</button>
+      <span class="hint" id="role-perms-error-${role.id}"></span>
+    </div>`;
+}
+
+function wireExpandedRoleControls(roleId) {
+  const saveBtn = document.querySelector(`[data-save-role="${CSS.escape(roleId)}"]`);
+  if (saveBtn) {
+    saveBtn.addEventListener('click', async () => {
+      const card = document.querySelector(`[data-role-id="${CSS.escape(roleId)}"]`);
+      const perms = readPermGrid(card);
+      try {
+        const updated = await api(`/api/servers/${serverId}/role-permissions/${roleId}`, { method: 'PATCH', body: JSON.stringify(perms) });
+        configuredByRoleId[roleId] = updated;
+        saveBtn.classList.add('save-success');
+        saveBtn.textContent = 'Saved ✓';
+        setTimeout(() => {
+          expandedRoleId = null;
+          renderRoleList();
+        }, 420);
+      } catch (err) {
+        document.getElementById(`role-perms-error-${roleId}`).textContent = err.message;
+      }
+    });
+  }
+
+  const clearBtn = document.querySelector(`[data-clear-role="${CSS.escape(roleId)}"]`);
+  if (clearBtn) {
+    clearBtn.addEventListener('click', async () => {
+      try {
+        await api(`/api/servers/${serverId}/role-permissions/${roleId}`, { method: 'DELETE' });
+        delete configuredByRoleId[roleId];
+        expandedRoleId = null;
+        renderRoleList();
+      } catch (err) {
+        document.getElementById(`role-perms-error-${roleId}`).textContent = err.message;
+      }
+    });
+  }
+}
+
+document.getElementById('role-search').addEventListener('input', (e) => {
+  roleSearchQuery = e.target.value.trim().toLowerCase();
+  renderRoleList();
+});
+
+document.getElementById('ban-member-btn').addEventListener('click', async () => {
+  const discordId = document.getElementById('ban-member-id').value.trim();
+  const reason = document.getElementById('ban-member-reason').value.trim() || undefined;
+  if (!discordId) return showError('Enter a Discord ID.');
+
+  try {
+    await api(`/api/servers/${serverId}/members/${discordId}/ban`, { method: 'POST', body: JSON.stringify({ reason }) });
+    document.getElementById('ban-member-id').value = '';
+    document.getElementById('ban-member-reason').value = '';
+    await load();
+  } catch (err) {
+    showError(err.message);
+  }
+});
 
 function renderBanned(banned) {
   const list = document.getElementById('banned-list');

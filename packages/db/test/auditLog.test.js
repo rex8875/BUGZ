@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('./helpers/loadDb');
+const { withDiscordRoles } = require('./helpers/discordRoleMock');
+
+const TESTER_ROLE = 'tester-discord-role';
 
 async function setupServer(db) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
@@ -12,9 +15,8 @@ async function setupServer(db) {
 test('governance actions are recorded in the audit log with the correct actor and action type', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServer(db);
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
 
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
   await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', reason: 'spam' });
   await db.unbanMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
   const link = await db.createShareLink({ serverId: server.id, actingDiscordId: 'owner1', accessLevel: 'VIEW' });
@@ -23,7 +25,7 @@ test('governance actions are recorded in the audit log with the correct actor an
   const log = await db.listAuditLog(server.id);
   const actions = log.map((e) => e.action);
 
-  assert.ok(actions.includes('ROLE_GRANTED'));
+  assert.ok(actions.includes('ROLE_PERMISSIONS_UPDATED'));
   assert.ok(actions.includes('MEMBER_BANNED'));
   assert.ok(actions.includes('MEMBER_UNBANNED'));
   assert.ok(actions.includes('SHARE_LINK_CREATED'));
@@ -42,19 +44,20 @@ test('audit log entries are scoped per server, and most-recent-first', async () 
   await db.createShareLink({ serverId: serverA.id, actingDiscordId: 'owner1', accessLevel: 'VIEW', label: 'third' });
 
   const logA = await db.listAuditLog(serverA.id);
-  assert.equal(logA.length, 2, 'server B\'s action must not appear in server A\'s log');
+  assert.equal(logA.length, 2, "server B's action must not appear in server A's log");
   assert.equal(JSON.parse(logA[0].details).label, 'third', 'most recent entry should come first');
 });
 
 test('routine bug-report status/priority edits are deliberately NOT logged — only governance actions are', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServer(db);
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
 
-  const report = await db.createBugReport(server.id, 'tester1', { title: 't', description: 'd', priority: 'LOW', status: 'NEW' });
-  await db.updateBugReport({ serverId: server.id, actingDiscordId: 'owner1', bugReportId: report.id, requestedChanges: { status: 'FIXED' } });
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    const report = await db.createBugReport(server.id, 'tester1', { title: 't', description: 'd', priority: 'LOW', status: 'NEW' });
+    await db.updateBugReport({ serverId: server.id, actingDiscordId: 'owner1', bugReportId: report.id, requestedChanges: { status: 'FIXED' } });
 
-  const log = await db.listAuditLog(server.id);
-  assert.equal(log.filter((e) => e.action.startsWith('REPORT_')).length, 0);
+    const log = await db.listAuditLog(server.id);
+    assert.equal(log.filter((e) => e.action.startsWith('REPORT_')).length, 0);
+  });
 });

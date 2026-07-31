@@ -26,43 +26,18 @@ async function isBanned(serverId, discordId) {
 
 // ---- Servers -------------------------------------------------------
 
-// Called from the bot's guildCreate handler. Creates the server row
-// plus a default Owner role (full perms) and Tester role (baseline)
-// if this is the first time the bot has seen this guild. ownerDiscordId
-// is whoever the bot could identify as the inviter, falling back to
-// the guild's Discord-owner if the audit log wasn't readable.
+// Called from the bot's guildCreate handler. Creates the server row if
+// this is the first time the bot has seen this guild. ownerDiscordId is
+// whoever the bot could identify as the inviter, falling back to the
+// guild's Discord-owner if the audit log wasn't readable. Nothing else
+// to seed — there's no default internal role set anymore; permissions
+// come from whichever real Discord roles the owner later configures via
+// setRolePermissions.
 async function createServerOnJoin({ discordServerId, name, ownerDiscordId, iconUrl }) {
   return prisma.server.upsert({
     where: { discordServerId },
     update: { name, isActive: true, ...(iconUrl !== undefined ? { iconUrl } : {}) },
-    create: {
-      discordServerId,
-      name,
-      ownerDiscordId,
-      iconUrl: iconUrl || null,
-      roles: {
-        create: [
-          {
-            name: 'Owner',
-            rank: 100,
-            canSubmitBugs: true,
-            canViewDashboard: true,
-            canManageBugs: true,
-            canPingTesters: true,
-            canArchive: true,
-            canEditReports: true,
-            canDeleteReports: true,
-            canShareDashboard: true,
-            canKickMembers: true,
-            canBanMembers: true,
-            canManageRoles: true,
-            canManageSettings: true,
-          },
-          { name: 'Tester', rank: 10, canSubmitBugs: true },
-        ],
-      },
-    },
-    include: { roles: true },
+    create: { discordServerId, name, ownerDiscordId, iconUrl: iconUrl || null },
   });
 }
 
@@ -78,21 +53,15 @@ async function deactivateServer(discordServerId) {
 }
 
 // Called when an individual PERSON leaves the Discord server (not the
-// bot) — removes only their own roles/membership, never touching
-// anyone else's access or the server itself. No permission checks here:
-// this isn't a person-initiated action, it's an automatic reaction to
-// Discord telling us they're gone.
-async function removeMembershipOnLeave(serverId, discordId) {
-  const membership = await getMembership(serverId, discordId);
-  if (!membership) return;
-
-  await prisma.memberRole.deleteMany({ where: { membershipId: membership.id } });
-  await prisma.membership.deleteMany({ where: { id: membership.id } });
+// bot). There's no internal Membership/role grant to clean up anymore —
+// permissions are checked live against Discord, so someone who's left
+// simply stops holding any role, automatically, on the very next check.
+// The one thing that DOES need explicit handling is the leaderboard:
+// score is preserved, just hidden, until they rejoin (automatic) or
+// someone with permission resets it (manual) — see resetLeaderboardScore.
+async function hideLeaverFromLeaderboard(serverId, discordId) {
   await logAction(serverId, discordId, 'MEMBER_LEFT_DISCORD', {});
 
-  // Hide (don't delete) their leaderboard standing — score is preserved,
-  // just not shown, until they rejoin (automatic) or someone with
-  // permission resets it (manual).
   const user = await prisma.user.findUnique({ where: { discordId } });
   if (user) {
     const hiddenAt = new Date();
@@ -103,9 +72,10 @@ async function removeMembershipOnLeave(serverId, discordId) {
 
 // Called on guildMemberAdd — automatically restores leaderboard
 // visibility if this person had a hidden score from a previous leave.
-// Does NOT restore their Membership/roles — that still requires an
-// admin to re-grant, same as any new member — this is specifically
-// about the leaderboard-hide behavior from removeMembershipOnLeave.
+// Their actual bot permissions were never removed in the first place
+// (they're checked live against Discord, not stored) — this function
+// exists purely for the leaderboard-hide behavior in
+// hideLeaverFromLeaderboard, which IS explicit stored state.
 async function restoreLeaderboardVisibilityOnRejoin(serverId, discordId) {
   const user = await prisma.user.findUnique({ where: { discordId } });
   if (!user) return;
@@ -128,7 +98,7 @@ async function resetLeaderboardScore({ serverId, actingDiscordId, targetDiscordI
   await prisma.weeklyScore.updateMany({ where: { serverId, userId: user.id }, data: { points: 0, hiddenAt: null } });
 }
 
-async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId, announceChannelId, adminRoleId }) {
+async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId, announceChannelId }) {
   const perms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!perms?.canManageSettings) throw new Error('Not permitted to manage settings in this server.');
 
@@ -136,7 +106,6 @@ async function updateServerSettings({ serverId, actingDiscordId, retestChannelId
   if (retestChannelId !== undefined) data.retestChannelId = retestChannelId;
   if (testerPingRoleId !== undefined) data.testerPingRoleId = testerPingRoleId;
   if (announceChannelId !== undefined) data.announceChannelId = announceChannelId;
-  if (adminRoleId !== undefined) data.adminRoleId = adminRoleId;
 
   return prisma.server.update({ where: { id: serverId }, data });
 }
@@ -179,55 +148,24 @@ async function getUserByDiscordId(discordId) {
 
 // ---- Users & verification -------------------------------------------
 
-// Runs once, the first time someone verifies via the bot or the site's
-// Discord OAuth. If they're the recorded owner of a server that has no
-// Owner membership yet, they're auto-granted that role here.
+// Runs the first time someone verifies via the bot or the site's
+// Discord OAuth. Nothing to bootstrap anymore — being the recorded
+// owner of a server (Server.ownerDiscordId) already means full access,
+// checked live in getEffectivePermissions, with no separate role grant
+// to claim.
 async function verifyUser({ discordId, discordUsername }) {
-  const user = await prisma.user.upsert({
+  return prisma.user.upsert({
     where: { discordId },
     update: { discordUsername, verifiedAt: new Date() },
     create: { discordId, discordUsername, verifiedAt: new Date() },
   });
-
-  const unclaimedOwnedServers = await prisma.server.findMany({
-    where: {
-      ownerDiscordId: discordId,
-      memberships: { none: { userId: user.id } },
-    },
-  });
-
-  for (const server of unclaimedOwnedServers) {
-    await assignOwnerRole(server.id, user.id);
-  }
-
-  return user;
-}
-
-// Finds this server's Owner role and adds it to a user's held roles,
-// creating their membership if they don't have one yet. ADDS — it
-// never removes whatever else they already hold, same as Discord's own
-// role model. Used both when an owner first verifies and when
-// ownership is transferred.
-async function assignOwnerRole(serverId, userId) {
-  const ownerRole = await prisma.role.findFirst({ where: { serverId, name: 'Owner' } });
-  if (!ownerRole) throw new Error('Server has no Owner role configured.');
-
-  const membership = await prisma.membership.upsert({
-    where: { userId_serverId: { userId, serverId } },
-    update: {},
-    create: { userId, serverId },
-  });
-
-  return prisma.memberRole.upsert({
-    where: { membershipId_roleId: { membershipId: membership.id, roleId: ownerRole.id } },
-    update: {},
-    create: { membershipId: membership.id, roleId: ownerRole.id },
-  });
 }
 
 // Only the current owner can do this — checked against Server.ownerDiscordId
-// itself, not just "has the Owner role", since that single field is the
-// real source of truth even if other members also hold the Owner role.
+// itself, which is also the single source of truth getEffectivePermissions
+// checks. No internal role to reassign; the moment this field changes,
+// the new owner has full access and the old one doesn't, on the very
+// next permission check.
 async function transferOwnership({ serverId, actingDiscordId, newOwnerDiscordId }) {
   const server = await prisma.server.findUnique({ where: { id: serverId } });
   if (!server) throw new Error('Server not found.');
@@ -241,51 +179,93 @@ async function transferOwnership({ serverId, actingDiscordId, newOwnerDiscordId 
   }
 
   await prisma.server.update({ where: { id: serverId }, data: { ownerDiscordId: newOwnerDiscordId } });
-  await assignOwnerRole(serverId, newOwner.id);
   await logAction(serverId, actingDiscordId, 'OWNERSHIP_TRANSFERRED', { to: newOwnerDiscordId });
 
   return prisma.server.findUnique({ where: { id: serverId } });
 }
 
-// ---- Memberships & permissions --------------------------------------
+// ---- Live Discord role checks ----------------------------------------
+//
+// Nothing below stores who holds what role — every check asks Discord
+// directly, every time. This is the whole point: permissions are linked
+// to a server's REAL roles (the same ones visible in Discord's own
+// member list and role settings), not a parallel bot-internal role
+// system that has to be kept in sync by hand. Remove someone's Discord
+// role and their bot access changes on the very next check, with
+// nothing to clean up here.
 
-// Includes every role currently held, not just one — membership.roles
-// is an array of MemberRole join rows, each with its .role attached.
-async function getMembership(serverId, discordId) {
-  return prisma.membership.findFirst({
-    where: { serverId, user: { discordId } },
-    include: { roles: { include: { role: true } } },
-  });
+const DISCORD_API = 'https://discord.com/api/v10';
+
+// A single guild member's current role ids, straight from Discord.
+// Returns null (not an empty array) on any failure — including the
+// person no longer being in the server — so callers can tell "confirmed
+// zero roles" apart from "couldn't check" if that distinction matters.
+async function getMemberDiscordRoleIds(discordServerId, discordId) {
+  try {
+    const res = await fetch(`${DISCORD_API}/guilds/${discordServerId}/members/${discordId}`, {
+      headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
+    });
+    if (!res.ok) return null; // includes 404 (not a member / left the server)
+    const member = await res.json();
+    return Array.isArray(member.roles) ? member.roles : [];
+  } catch {
+    return null;
+  }
 }
 
-function rolesOf(membership) {
-  return membership.roles.map((mr) => mr.role);
+// Every role in the guild with its live Discord position (higher =
+// more senior, matching Discord's own role list ordering) — powers the
+// rank-safety checks (can't configure/ban someone at or above your own
+// role position) without maintaining a separate internal rank number.
+async function getDiscordRoleHierarchy(discordServerId) {
+  try {
+    const res = await fetch(`${DISCORD_API}/guilds/${discordServerId}/roles`, {
+      headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
+    });
+    if (!res.ok) return null;
+    const roles = await res.json();
+    return new Map(roles.map((r) => [r.id, r.position]));
+  } catch {
+    return null;
+  }
 }
 
-// The highest rank among every role someone holds — this is what
-// "your rank" means for deciding what you're allowed to grant/revoke,
-// and what's too senior for someone else to touch. Matches Discord:
-// your authority comes from your highest role, not your lowest.
-function effectiveRank(roles) {
-  return roles.length === 0 ? 0 : Math.max(...roles.map((r) => r.rank));
+async function highestRolePosition(discordServerId, discordId, hierarchy) {
+  const roleIds = await getMemberDiscordRoleIds(discordServerId, discordId);
+  if (!roleIds || roleIds.length === 0) return 0;
+  return Math.max(0, ...roleIds.map((id) => hierarchy.get(id) ?? 0));
 }
 
-// Permissions are the OR across every role held — if any one role you
-// have grants canManageBugs, you have canManageBugs, full stop.
-function permissionsFromRoles(roles) {
-  const any = (key) => roles.some((r) => r[key]);
+// Throws if targetDiscordId's highest live role position is at or above
+// actingDiscordId's — the real-Discord-hierarchy equivalent of the old
+// internal rank check. The server owner is always exempt (both as
+// actor and can never be the target, checked separately by callers).
+async function assertBelowActingRank({ discordServerId, actingDiscordId, targetDiscordId, actionLabel }) {
+  const hierarchy = await getDiscordRoleHierarchy(discordServerId);
+  if (!hierarchy) throw new Error('Could not verify Discord role hierarchy — try again in a moment.');
+  const actingPos = await highestRolePosition(discordServerId, actingDiscordId, hierarchy);
+  const targetPos = await highestRolePosition(discordServerId, targetDiscordId, hierarchy);
+  if (targetPos >= actingPos) throw new Error(`Cannot ${actionLabel} someone at or above your own role position.`);
+}
+
+// Permissions are the OR across every configured role someone
+// currently, actually holds — if any one matching role grants
+// canManageBugs, they have canManageBugs, full stop. Same logic
+// Discord itself uses for combining a member's own permissions.
+function permissionsFromRolePermissions(rows) {
+  const any = (key) => rows.some((r) => r[key]);
 
   // canViewDashboard is the gate every other dashboard permission sits
   // behind. Granting e.g. canManageBugs without it would silently do
-  // nothing — easy to do by accident when setting up a custom role — so
-  // any other dashboard power implies view access too.
+  // nothing — easy to do by accident when configuring a role — so any
+  // other dashboard power implies view access too.
   const impliesView =
     any('canManageBugs') || any('canPingTesters') || any('canArchive') || any('canEditReports') ||
-    any('canDeleteReports') || any('canShareDashboard') || any('canKickMembers') || any('canBanMembers') ||
-    any('canManageRoles') || any('canManageSettings');
+    any('canDeleteReports') || any('canShareDashboard') || any('canBanMembers') || any('canManageRoles') ||
+    any('canManageSettings');
 
   return {
-    source: 'member',
+    source: 'role',
     canSubmitBugs: any('canSubmitBugs'),
     canViewDashboard: any('canViewDashboard') || impliesView,
     canManageBugs: any('canManageBugs'),
@@ -294,7 +274,6 @@ function permissionsFromRoles(roles) {
     canEditReports: any('canEditReports'),
     canDeleteReports: any('canDeleteReports'),
     canShareDashboard: any('canShareDashboard'),
-    canKickMembers: any('canKickMembers'),
     canBanMembers: any('canBanMembers'),
     canManageRoles: any('canManageRoles'),
     canManageSettings: any('canManageSettings'),
@@ -303,7 +282,7 @@ function permissionsFromRoles(roles) {
 
 // Dev-access guests get the bug-content powers (edit/delete sit
 // alongside manage/archive), but never the member-governance ones —
-// a contractor's link shouldn't be able to kick, ban, or mint more access.
+// a contractor's link shouldn't be able to ban or mint more access.
 function permissionsFromShareLink(shareLink) {
   const isDev = shareLink.accessLevel === 'DEV';
   return {
@@ -316,26 +295,14 @@ function permissionsFromShareLink(shareLink) {
     canEditReports: isDev,
     canDeleteReports: isDev,
     canShareDashboard: false,
-    canKickMembers: false,
     canBanMembers: false,
     canManageRoles: false,
     canManageSettings: false,
   };
 }
 
-// The one function the dashboard should call to check what someone can
-// do in a given server. Resolves real Memberships first; if there isn't
-// one, falls back to checking for an unrevoked share-link grant. Either
-// way the caller gets the same shape back, so it doesn't need to care
-// which path the access came from.
-const DISCORD_API = 'https://discord.com/api/v10';
-
-// Every permission flag true — what holding the server's designated
-// admin Discord role grants. Kept as a plain object literal (not
-// derived from permissionsFromRoles) so its shape is easy to eyeball
-// against that function's return shape and keep in sync by hand.
 const FULL_PERMISSIONS = {
-  source: 'admin-role',
+  source: 'owner',
   canSubmitBugs: true,
   canViewDashboard: true,
   canManageBugs: true,
@@ -344,56 +311,34 @@ const FULL_PERMISSIONS = {
   canEditReports: true,
   canDeleteReports: true,
   canShareDashboard: true,
-  canKickMembers: true,
   canBanMembers: true,
   canManageRoles: true,
   canManageSettings: true,
 };
 
-// Checks LIVE against Discord's API whether a person currently holds a
-// specific role — no local caching, no separate internal role grant.
-// This is intentionally the single source of truth for the admin-role
-// bypass: if the role is removed from them in Discord, the very next
-// permission check reflects that immediately, with nothing to clean up
-// on our side. Fails closed (false) on any error — a Discord outage or
-// rate limit should never accidentally grant access.
-async function memberHasDiscordRole(discordServerId, discordId, roleId) {
-  try {
-    const res = await fetch(`${DISCORD_API}/guilds/${discordServerId}/members/${discordId}`, {
-      headers: { Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}` },
-    });
-    if (!res.ok) return false; // includes 404 (not a member / left the server)
-    const member = await res.json();
-    return Array.isArray(member.roles) && member.roles.includes(roleId);
-  } catch {
-    return false;
-  }
-}
-
+// The one function the dashboard and every bot command should call to
+// check what someone can do in a given server. Checks, in order: (1)
+// the recorded Discord server owner — always full access, no live call
+// needed since it's already stored; (2) an app-level ban — an absolute
+// override regardless of roles; (3) live Discord role membership,
+// unioned across every configured RolePermission row that matches a
+// role they currently hold; (4) an unrevoked share-link guest grant, as
+// a last resort, unrelated to Discord roles entirely.
 async function getEffectivePermissions(serverId, discordId) {
   const server = await prisma.server.findUnique({ where: { id: serverId } });
   if (!server || !server.isActive) return null;
 
-  const membership = await getMembership(serverId, discordId);
-  const internalPerms = membership ? permissionsFromRoles(rolesOf(membership)) : null;
+  if (discordId === server.ownerDiscordId) return FULL_PERMISSIONS;
 
-  // Already maximally privileged through the normal internal role
-  // system — skip the live Discord round-trip entirely, both for speed
-  // and to avoid burning a Discord API call on every single permission
-  // check for the people who don't need this feature at all.
-  if (internalPerms?.canManageSettings) return internalPerms;
+  if (await isBanned(serverId, discordId)) return null;
 
-  // The admin-role bypass: checked fresh against Discord every time,
-  // never stored locally. If it's held, it wins outright — overriding
-  // whatever more limited internal role (or none at all) this person
-  // might separately have, since holding the role is meant to mean
-  // full access, full stop.
-  if (server.adminRoleId) {
-    const hasAdminRole = await memberHasDiscordRole(server.discordServerId, discordId, server.adminRoleId);
-    if (hasAdminRole) return FULL_PERMISSIONS;
+  const memberRoleIds = await getMemberDiscordRoleIds(server.discordServerId, discordId);
+  if (memberRoleIds && memberRoleIds.length > 0) {
+    const configured = await prisma.rolePermission.findMany({
+      where: { serverId, discordRoleId: { in: memberRoleIds } },
+    });
+    if (configured.length > 0) return permissionsFromRolePermissions(configured);
   }
-
-  if (internalPerms) return internalPerms;
 
   const user = await prisma.user.findUnique({ where: { discordId } });
   if (!user) return null;
@@ -408,25 +353,22 @@ async function getEffectivePermissions(serverId, discordId) {
 }
 
 // For the "which server's dashboard am I in" picker page after login —
-// every server this person can reach, whether as a member or a guest.
+// every active server this person can reach, whether as owner, via a
+// configured role they hold, or as a guest. Iterates every active
+// server and live-checks each (bounded by however many servers the bot
+// is actually in) rather than querying a stored membership list, since
+// there isn't one anymore.
 async function listAccessibleServers(discordId) {
   const user = await prisma.user.findUnique({ where: { discordId } });
   if (!user) return [];
 
-  const memberships = await prisma.membership.findMany({
-    where: { userId: user.id, server: { isActive: true } },
-    include: { server: true, roles: { include: { role: true } } },
-  });
-
-  const guestAccesses = await prisma.guestAccess.findMany({
-    where: { userId: user.id, shareLink: { revokedAt: null }, server: { isActive: true } },
-    include: { server: true, shareLink: true },
-  });
-
-  return [
-    ...memberships.map((m) => ({ server: m.server, permissions: permissionsFromRoles(rolesOf(m)) })),
-    ...guestAccesses.map((g) => ({ server: g.server, permissions: permissionsFromShareLink(g.shareLink) })),
-  ];
+  const activeServers = await prisma.server.findMany({ where: { isActive: true } });
+  const results = [];
+  for (const server of activeServers) {
+    const permissions = await getEffectivePermissions(server.id, discordId);
+    if (permissions) results.push({ server, permissions });
+  }
+  return results;
 }
 
 // Adds a role to whatever someone already holds — does not replace or
@@ -434,139 +376,40 @@ async function listAccessibleServers(discordId) {
 // Tester tag to someone who also holds Owner, without that grant
 // affecting their Owner role at all. The check is purely about the role
 // being granted, not about what else the target holds.
-async function grantRole({ serverId, actingDiscordId, targetDiscordId, roleId }) {
-  const acting = await getMembership(serverId, actingDiscordId);
-  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
-  if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
-
-  if (await isBanned(serverId, targetDiscordId)) {
-    throw new Error('That person is banned from this server — unban them first.');
-  }
-
-  // No separate "can't touch the owner" rule needed here — the rank
-  // check below already makes the Owner role itself untouchable by
-  // anyone who doesn't already hold rank 100, which is the actual
-  // protection. A lower role (e.g. Tester) can still be freely granted
-  // to the owner without affecting their Owner role at all.
-  const role = await prisma.role.findFirst({ where: { id: roleId, serverId } });
-  if (!role) throw new Error('That role does not belong to this server.');
-  if (role.rank >= effectiveRank(rolesOf(acting))) {
-    throw new Error('Cannot grant a role at or above your own rank.');
-  }
-
-  const targetUser = await prisma.user.findUnique({ where: { discordId: targetDiscordId } });
-  if (!targetUser) throw new Error('That person has not verified yet.');
-
-  const membership = await prisma.membership.upsert({
-    where: { userId_serverId: { userId: targetUser.id, serverId } },
-    update: {},
-    create: { userId: targetUser.id, serverId },
-  });
-
-  await prisma.memberRole.upsert({
-    where: { membershipId_roleId: { membershipId: membership.id, roleId: role.id } },
-    update: {},
-    create: { membershipId: membership.id, roleId: role.id },
-  });
-
-  await logAction(serverId, actingDiscordId, 'ROLE_GRANTED', { target: targetDiscordId, role: role.name });
-  return getMembership(serverId, targetDiscordId);
-}
-
-// Removes one specific role, leaving everything else the target holds
-// untouched. If that was their last role, the membership itself is
-// cleaned up too — holding zero roles isn't meaningfully "being a
-// member" of anything.
-async function revokeRole({ serverId, actingDiscordId, targetDiscordId, roleId }) {
-  const acting = await getMembership(serverId, actingDiscordId);
-  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
-  if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
-
-  // Same reasoning as grantRole: the rank check below already makes the
-  // Owner role itself untouchable by anyone who doesn't hold rank 100
-  // (including the owner trying to self-revoke it, since the check uses
-  // >=) — that's the real protection. A lower role can still be freely
-  // revoked from the owner without affecting their Owner role.
-  const role = await prisma.role.findFirst({ where: { id: roleId, serverId } });
-  if (!role) throw new Error('That role does not belong to this server.');
-  if (role.rank >= effectiveRank(rolesOf(acting))) {
-    throw new Error('Cannot revoke a role at or above your own rank.');
-  }
-
-  const target = await getMembership(serverId, targetDiscordId);
-  if (!target || !target.roles.some((mr) => mr.roleId === roleId)) {
-    throw new Error('That person does not hold this role.');
-  }
-
-  await prisma.memberRole.deleteMany({ where: { membershipId: target.id, roleId } });
-  await logAction(serverId, actingDiscordId, 'ROLE_REVOKED', { target: targetDiscordId, role: role.name });
-
-  const remaining = await prisma.memberRole.count({ where: { membershipId: target.id } });
-  if (remaining === 0) {
-    await prisma.membership.deleteMany({ where: { id: target.id } });
-  }
-}
-
-// Every member currently in this server, with all their held roles, for
-// the roles/members page. Sorted by effective (highest) rank — can't
-// express "max across a relation" as a database orderBy, so sorted here.
-async function listMembers(serverId) {
-  const memberships = await prisma.membership.findMany({
-    where: { serverId },
-    include: { user: true, roles: { include: { role: true } } },
-  });
-  return memberships.sort((a, b) => effectiveRank(rolesOf(b)) - effectiveRank(rolesOf(a)));
-}
+// ---- Moderation: app-level ban list ------------------------------------
+//
+// There's no "kick" anymore — under the old model it meant "remove
+// their internal role grants without a permanent block", but there's
+// nothing internal left to remove; someone's Discord roles are theirs
+// regardless of what this bot thinks. The one moderation action that
+// still makes sense here is an app-level ban: block a specific person
+// from the bug tracker outright, regardless of what Discord roles they
+// hold — for the rare case of someone abusing access who you don't want
+// to strip a role from (maybe they hold it for unrelated reasons).
+// Actually removing/managing real Discord roles is left to Discord
+// itself (or a dedicated role-management bot) — this bot only reads
+// roles, it doesn't assign or remove them.
 
 async function listBannedMembers(serverId) {
   return prisma.bannedMember.findMany({ where: { serverId }, orderBy: { bannedAt: 'desc' } });
 }
 
-// Removes ALL of someone's roles without a permanent ban — they could
-// be re-added later without anyone needing to unban them first.
-async function kickMember({ serverId, actingDiscordId, targetDiscordId }) {
-  const acting = await getMembership(serverId, actingDiscordId);
-  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
-  if (!actingPerms?.canKickMembers) throw new Error('Not permitted to kick members in this server.');
-
-  const server = await prisma.server.findUnique({ where: { id: serverId } });
-  if (server.ownerDiscordId === targetDiscordId) {
-    throw new Error('Cannot kick the server owner — transfer ownership first.');
-  }
-
-  const target = await getMembership(serverId, targetDiscordId);
-  if (target && effectiveRank(rolesOf(target)) >= effectiveRank(rolesOf(acting))) {
-    throw new Error('Cannot kick someone at or above your own rank.');
-  }
-
-  if (target) {
-    await prisma.memberRole.deleteMany({ where: { membershipId: target.id } });
-    await prisma.membership.deleteMany({ where: { id: target.id } });
-  }
-  await logAction(serverId, actingDiscordId, 'MEMBER_KICKED', { target: targetDiscordId });
-}
-
-// Removes membership (if any) and blocks the person from being added
-// back until unbanned.
 async function banMember({ serverId, actingDiscordId, targetDiscordId, reason }) {
-  const acting = await getMembership(serverId, actingDiscordId);
-  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  const actingPerms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!actingPerms?.canBanMembers) throw new Error('Not permitted to ban members in this server.');
 
   const server = await prisma.server.findUnique({ where: { id: serverId } });
   if (server.ownerDiscordId === targetDiscordId) {
     throw new Error('Cannot ban the server owner — transfer ownership first.');
   }
+  if (targetDiscordId === actingDiscordId) throw new Error('Cannot ban yourself.');
 
-  const target = await getMembership(serverId, targetDiscordId);
-  if (target && effectiveRank(rolesOf(target)) >= effectiveRank(rolesOf(acting))) {
-    throw new Error('Cannot ban someone at or above your own rank.');
+  if (actingDiscordId !== server.ownerDiscordId) {
+    await assertBelowActingRank({
+      discordServerId: server.discordServerId, actingDiscordId, targetDiscordId, actionLabel: 'ban',
+    });
   }
 
-  if (target) {
-    await prisma.memberRole.deleteMany({ where: { membershipId: target.id } });
-    await prisma.membership.deleteMany({ where: { id: target.id } });
-  }
   await prisma.bannedMember.upsert({
     where: { serverId_discordId: { serverId, discordId: targetDiscordId } },
     update: { reason, bannedByDiscordId: actingDiscordId, bannedAt: new Date() },
@@ -576,72 +419,66 @@ async function banMember({ serverId, actingDiscordId, targetDiscordId, reason })
 }
 
 async function unbanMember({ serverId, actingDiscordId, targetDiscordId }) {
-  const acting = await getMembership(serverId, actingDiscordId);
-  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+  const actingPerms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!actingPerms?.canBanMembers) throw new Error('Not permitted to unban members in this server.');
 
   await prisma.bannedMember.deleteMany({ where: { serverId, discordId: targetDiscordId } });
   await logAction(serverId, actingDiscordId, 'MEMBER_UNBANNED', { target: targetDiscordId });
 }
 
-// ---- Roles -------------------------------------------------------------
+// ---- Role permissions (linked to real Discord roles) -------------------
 
-async function listRoles(serverId) {
-  return prisma.role.findMany({ where: { serverId }, orderBy: { rank: 'desc' } });
+async function listRolePermissions(serverId) {
+  return prisma.rolePermission.findMany({ where: { serverId } });
 }
 
-// Can only create a role at a rank strictly below your own — same
-// ceiling logic as granting, applied to minting the role itself.
-async function createRole({ serverId, actingDiscordId, name, rank, permissions = {} }) {
-  const acting = await getMembership(serverId, actingDiscordId);
-  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+// Create-or-update semantics for one Discord role's permissions — no
+// separate "does this role exist yet" step, since the role itself
+// already exists in Discord; this just configures what it can do here.
+// Rank-safety uses Discord's own live role position: you can't
+// configure a role that's at or above your own highest role's position
+// (the owner is exempt, since they might legitimately hold no
+// configured role at all).
+async function setRolePermissions({ serverId, actingDiscordId, discordRoleId, permissions }) {
+  const actingPerms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
-  if (rank >= effectiveRank(rolesOf(acting))) throw new Error('Cannot create a role at or above your own rank.');
 
-  const existing = await prisma.role.findFirst({ where: { serverId, name } });
-  if (existing) throw new Error(`A role named "${name}" already exists in this server.`);
-
-  const role = await prisma.role.create({ data: { serverId, name, rank, ...permissions } });
-  await logAction(serverId, actingDiscordId, 'ROLE_CREATED', { role: name, rank });
-  return role;
-}
-
-async function updateRolePermissions({ serverId, actingDiscordId, roleId, permissions }) {
-  const acting = await getMembership(serverId, actingDiscordId);
-  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
-  if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
-  const actingRank = effectiveRank(rolesOf(acting));
-
-  const target = await prisma.role.findFirst({ where: { id: roleId, serverId } });
-  if (!target) throw new Error('That role does not belong to this server.');
-  if (target.rank >= actingRank) throw new Error('Cannot edit a role at or above your own rank.');
-  if (permissions.rank !== undefined && permissions.rank >= actingRank) {
-    throw new Error('Cannot raise a role to your own rank or above.');
-  }
-  if (permissions.name !== undefined && permissions.name !== target.name) {
-    const collision = await prisma.role.findFirst({ where: { serverId, name: permissions.name } });
-    if (collision) throw new Error(`A role named "${permissions.name}" already exists in this server.`);
+  const server = await prisma.server.findUnique({ where: { id: serverId } });
+  if (actingDiscordId !== server.ownerDiscordId) {
+    const hierarchy = await getDiscordRoleHierarchy(server.discordServerId);
+    if (!hierarchy) throw new Error('Could not verify Discord role hierarchy — try again in a moment.');
+    const actingPos = await highestRolePosition(server.discordServerId, actingDiscordId, hierarchy);
+    const targetPos = hierarchy.get(discordRoleId) ?? 0;
+    if (targetPos >= actingPos) throw new Error('Cannot configure a role at or above your own role position.');
   }
 
-  const updated = await prisma.role.update({ where: { id: roleId }, data: permissions });
-  await logAction(serverId, actingDiscordId, 'ROLE_UPDATED', { role: target.name });
-  return updated;
+  const result = await prisma.rolePermission.upsert({
+    where: { serverId_discordRoleId: { serverId, discordRoleId } },
+    update: permissions,
+    create: { serverId, discordRoleId, ...permissions },
+  });
+  await logAction(serverId, actingDiscordId, 'ROLE_PERMISSIONS_UPDATED', { discordRoleId });
+  return result;
 }
 
-async function deleteRole({ serverId, actingDiscordId, roleId }) {
-  const acting = await getMembership(serverId, actingDiscordId);
-  const actingPerms = acting ? permissionsFromRoles(rolesOf(acting)) : null;
+// Clears a role's configuration entirely — back to holding no bot
+// permissions at all (not deleting the Discord role itself, obviously;
+// only this bot's record of what it's allowed to do).
+async function deleteRolePermissions({ serverId, actingDiscordId, discordRoleId }) {
+  const actingPerms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!actingPerms?.canManageRoles) throw new Error('Not permitted to manage roles in this server.');
 
-  const target = await prisma.role.findFirst({ where: { id: roleId, serverId } });
-  if (!target) throw new Error('That role does not belong to this server.');
-  if (target.rank >= effectiveRank(rolesOf(acting))) throw new Error('Cannot delete a role at or above your own rank.');
+  const server = await prisma.server.findUnique({ where: { id: serverId } });
+  if (actingDiscordId !== server.ownerDiscordId) {
+    const hierarchy = await getDiscordRoleHierarchy(server.discordServerId);
+    if (!hierarchy) throw new Error('Could not verify Discord role hierarchy — try again in a moment.');
+    const actingPos = await highestRolePosition(server.discordServerId, actingDiscordId, hierarchy);
+    const targetPos = hierarchy.get(discordRoleId) ?? 0;
+    if (targetPos >= actingPos) throw new Error('Cannot modify a role at or above your own role position.');
+  }
 
-  const inUse = await prisma.memberRole.count({ where: { roleId } });
-  if (inUse > 0) throw new Error(`${inUse} member(s) still hold this role — reassign them first.`);
-
-  await prisma.role.delete({ where: { id: roleId } });
-  await logAction(serverId, actingDiscordId, 'ROLE_DELETED', { role: target.name });
+  await prisma.rolePermission.deleteMany({ where: { serverId, discordRoleId } });
+  await logAction(serverId, actingDiscordId, 'ROLE_PERMISSIONS_REMOVED', { discordRoleId });
 }
 
 // ---- Dashboard share links -------------------------------------------
@@ -791,8 +628,7 @@ async function createBugReport(serverId, reporterDiscordId, data) {
     throw new Error('You are banned from this server.');
   }
 
-  const membership = await getMembership(serverId, reporterDiscordId);
-  const perms = membership ? permissionsFromRoles(rolesOf(membership)) : null;
+  const perms = await getEffectivePermissions(serverId, reporterDiscordId);
   if (!perms?.canSubmitBugs) {
     throw new Error('You do not have permission to report bugs in this server.');
   }
@@ -833,16 +669,19 @@ async function createBugReport(serverId, reporterDiscordId, data) {
   });
   const bugNumber = updatedServer.nextBugNumber - 1;
 
+  const reporterUser = await prisma.user.findUnique({ where: { discordId: reporterDiscordId } });
+  if (!reporterUser) throw new Error('You need to verify before you can report bugs — try /verify first.');
+
   const report = await prisma.bugReport.create({
-    data: { serverId, reporterId: membership.userId, bugNumber, ...reportData },
+    data: { serverId, reporterId: reporterUser.id, bugNumber, ...reportData },
   });
 
   // Each submitted bug is worth a point immediately, both all-time and
   // for the week it was reported in — see the DUPLICATE handling in
   // updateBugReport for how that gets corrected if it turns out not to
   // be a unique find.
-  await adjustLeaderboardPoints(serverId, membership.userId, 1);
-  await adjustWeeklyPoints(serverId, membership.userId, getWeekStart(report.createdAt), 1);
+  await adjustLeaderboardPoints(serverId, reporterUser.id, 1);
+  await adjustWeeklyPoints(serverId, reporterUser.id, getWeekStart(report.createdAt), 1);
 
   return report;
 }
@@ -1169,7 +1008,7 @@ module.exports = {
   createServerOnJoin,
   getServerByDiscordId,
   deactivateServer,
-  removeMembershipOnLeave,
+  hideLeaverFromLeaderboard,
   restoreLeaderboardVisibilityOnRejoin,
   resetLeaderboardScore,
   getServerById,
@@ -1178,27 +1017,18 @@ module.exports = {
   isValidBackgroundStyle,
   getUserByDiscordId,
   verifyUser,
-  assignOwnerRole,
   transferOwnership,
-  getMembership,
-  rolesOf,
-  effectiveRank,
-  permissionsFromRoles,
+  getMemberDiscordRoleIds,
+  getDiscordRoleHierarchy,
   getEffectivePermissions,
-  memberHasDiscordRole,
   listAccessibleServers,
-  grantRole,
-  revokeRole,
-  listMembers,
   listBannedMembers,
-  kickMember,
   banMember,
   unbanMember,
   isBanned,
-  listRoles,
-  createRole,
-  updateRolePermissions,
-  deleteRole,
+  listRolePermissions,
+  setRolePermissions,
+  deleteRolePermissions,
   listAuditLog,
   createShareLink,
   revokeShareLink,

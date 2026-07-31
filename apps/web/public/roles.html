@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Roles & members</title>
+  <title>Roles & permissions</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div class="container">
     <div class="topbar">
-      <h1>Roles & members</h1>
+      <h1>Roles & Permissions</h1>
       <a id="back-link" href=""><button>Back to dashboard</button></a>
     </div>
 
@@ -16,21 +16,18 @@
 
     <section>
       <h2>Roles</h2>
-      <div id="role-list"></div>
-      <div class="detail-panel" style="margin-top:10px;">
-        <div class="field-group">
-          <div><label>Name</label><input type="text" id="new-role-name" placeholder="e.g. Dev" /></div>
-          <div><label>Rank</label><input type="text" id="new-role-rank" placeholder="e.g. 50" /></div>
-        </div>
-        <div id="new-role-perms" class="perm-grid"></div>
-        <button id="create-role-btn" class="primary" style="margin-top:10px;">Create role</button>
+      <div class="cmd-perms-intro">
+        Bot permissions are linked directly to this server's own Discord roles — there's no separate role to create here. Pick one of your existing Discord roles below and choose what it can do. Anyone holding that role gets these permissions immediately, checked live against Discord; remove the role from them in Discord and access is gone just as fast.
       </div>
+      <div id="role-perms-summary" class="cmd-perms-summary"></div>
+      <input type="text" id="role-search" class="search-input" placeholder="Search your server's roles…" style="margin-bottom:12px;" />
+      <div id="role-list"></div>
     </section>
 
     <section style="margin-top:28px;">
       <h2>Command Permissions</h2>
       <div class="cmd-perms-intro">
-        By default, every command follows this server's normal role permissions above (the ones set on each role's checklist). You only need to touch anything here if you want a <em>specific command</em> restricted to <em>specific Discord roles</em> — like Dyno's per-command role restrictions — regardless of someone's normal permissions.
+        By default, every command follows this server's normal role permissions above. You only need to touch anything here if you want a <em>specific command</em> restricted to <em>specific Discord roles</em> — like Dyno's per-command role restrictions — regardless of someone's normal permissions.
       </div>
       <div id="cmd-perms-summary" class="cmd-perms-summary"></div>
       <input type="text" id="cmd-perms-search" class="search-input" placeholder="Search commands…" style="margin-bottom:12px;" />
@@ -38,20 +35,17 @@
     </section>
 
     <section style="margin-top:28px;">
-      <h2>Members</h2>
+      <h2>Ban</h2>
+      <div class="hint" style="margin-bottom:10px;">
+        Real membership lives in Discord itself — check your server's own member list there for who's actually in the server. Use this to block someone from the bug tracker specifically, regardless of what Discord role they hold.
+      </div>
       <div class="detail-panel" style="margin-bottom:10px;">
         <div class="field-group">
-          <div><label>Discord ID</label><input type="text" id="new-member-id" placeholder="Numeric Discord ID" /></div>
-          <div><label>Role</label><select id="new-member-role"></select></div>
+          <div><label>Discord ID</label><input type="text" id="ban-member-id" placeholder="Numeric Discord ID" /></div>
+          <div><label>Reason (optional)</label><input type="text" id="ban-member-reason" placeholder="Why" /></div>
         </div>
-        <button id="add-member-btn" class="primary" style="margin-top:8px;">Add member</button>
-        <div class="hint" style="margin-top:6px;">They must have already run /verify once. Easier to do this with `/set-role` in Discord directly — this is a fallback for when you already have their ID.</div>
+        <button id="ban-member-btn" class="primary" style="margin-top:8px;">Ban</button>
       </div>
-      <div id="member-list"></div>
-    </section>
-
-    <section style="margin-top:28px;">
-      <h2>Banned</h2>
       <div id="banned-list"></div>
     </section>
 

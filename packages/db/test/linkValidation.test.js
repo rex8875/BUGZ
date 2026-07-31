@@ -5,8 +5,6 @@ const { loadDbWithFakePrisma } = require('./helpers/loadDb');
 async function setupServer(db) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'owner1', roleId: testerRole.id });
   return server;
 }
 

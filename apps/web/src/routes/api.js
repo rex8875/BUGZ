@@ -15,15 +15,10 @@ const {
   revokeShareLink,
   listShareLinks,
   listAccessibleServers,
-  listRoles,
-  createRole,
-  updateRolePermissions,
-  deleteRole,
-  listMembers,
+  listRolePermissions,
+  setRolePermissions,
+  deleteRolePermissions,
   listBannedMembers,
-  grantRole,
-  revokeRole,
-  kickMember,
   banMember,
   unbanMember,
   listAuditLog,
@@ -291,29 +286,35 @@ router.patch('/api/servers/:serverId/command-permissions/:commandName', async (r
   }
 });
 
-// ---- Roles ----
+// ---- Role permissions (linked to real Discord roles, not a separate bot role) ----
 
-router.get('/api/servers/:serverId/roles', async (req, res) => {
+router.get('/api/servers/:serverId/role-permissions', async (req, res) => {
   if (!req.perms.canManageRoles) return res.status(403).json({ error: 'Not permitted to manage roles here.' });
-  res.json(await listRoles(req.server.id));
-});
-
-router.post('/api/servers/:serverId/roles', async (req, res) => {
   try {
-    const { name, rank, ...permissions } = req.body;
-    res.json(await createRole({ serverId: req.server.id, actingDiscordId: req.session.discordId, name, rank, permissions }));
+    const [discordRoles, configured] = await Promise.all([
+      listGuildRoles(req.server.discordServerId),
+      listRolePermissions(req.server.id),
+    ]);
+    res.json({
+      // @everyone (id === guildId) is never a meaningful role to
+      // configure bot permissions for — left out of the picker entirely.
+      roles: discordRoles
+        .filter((r) => r.id !== req.server.discordServerId)
+        .map((r) => ({ id: r.id, name: r.name, color: r.color, position: r.position })),
+      configured,
+    });
   } catch (err) {
-    res.status(403).json({ error: err.message });
+    res.status(502).json({ error: `Could not reach Discord: ${err.message}` });
   }
 });
 
-router.patch('/api/servers/:serverId/roles/:roleId', async (req, res) => {
+router.patch('/api/servers/:serverId/role-permissions/:discordRoleId', async (req, res) => {
   try {
     res.json(
-      await updateRolePermissions({
+      await setRolePermissions({
         serverId: req.server.id,
         actingDiscordId: req.session.discordId,
-        roleId: req.params.roleId,
+        discordRoleId: req.params.discordRoleId,
         permissions: req.body,
       }),
     );
@@ -322,9 +323,9 @@ router.patch('/api/servers/:serverId/roles/:roleId', async (req, res) => {
   }
 });
 
-router.delete('/api/servers/:serverId/roles/:roleId', async (req, res) => {
+router.delete('/api/servers/:serverId/role-permissions/:discordRoleId', async (req, res) => {
   try {
-    await deleteRole({ serverId: req.server.id, actingDiscordId: req.session.discordId, roleId: req.params.roleId });
+    await deleteRolePermissions({ serverId: req.server.id, actingDiscordId: req.session.discordId, discordRoleId: req.params.discordRoleId });
     res.json({ ok: true });
   } catch (err) {
     res.status(403).json({ error: err.message });
@@ -332,49 +333,12 @@ router.delete('/api/servers/:serverId/roles/:roleId', async (req, res) => {
 });
 
 // ---- Members ----
-
-router.get('/api/servers/:serverId/members', async (req, res) => {
-  if (!req.perms.canManageRoles) return res.status(403).json({ error: 'Not permitted to manage members here.' });
-  res.json(await listMembers(req.server.id));
-});
-
-router.post('/api/servers/:serverId/members/:discordId/roles/:roleId/grant', async (req, res) => {
-  try {
-    res.json(
-      await grantRole({
-        serverId: req.server.id,
-        actingDiscordId: req.session.discordId,
-        targetDiscordId: req.params.discordId,
-        roleId: req.params.roleId,
-      }),
-    );
-  } catch (err) {
-    res.status(403).json({ error: err.message });
-  }
-});
-
-router.post('/api/servers/:serverId/members/:discordId/roles/:roleId/revoke', async (req, res) => {
-  try {
-    await revokeRole({
-      serverId: req.server.id,
-      actingDiscordId: req.session.discordId,
-      targetDiscordId: req.params.discordId,
-      roleId: req.params.roleId,
-    });
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(403).json({ error: err.message });
-  }
-});
-
-router.post('/api/servers/:serverId/members/:discordId/kick', async (req, res) => {
-  try {
-    await kickMember({ serverId: req.server.id, actingDiscordId: req.session.discordId, targetDiscordId: req.params.discordId });
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(403).json({ error: err.message });
-  }
-});
+//
+// There's no member roster or grant/revoke/kick here anymore — real
+// Discord roles ARE the membership, viewable in Discord's own member
+// list, and this bot only reads them rather than assigning them. Ban is
+// the one moderation action left: an app-level access block independent
+// of whatever Discord roles someone holds.
 
 router.post('/api/servers/:serverId/members/:discordId/ban', async (req, res) => {
   try {

@@ -1,13 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('./helpers/loadDb');
+const { withDiscordRoles } = require('./helpers/discordRoleMock');
+
+const TESTER_ROLE = 'tester-discord-role';
 
 async function setupServer(db) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
   await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
   return { server };
 }
 
@@ -50,10 +52,12 @@ test('an owner can set a valid 2-color gradient background', async () => {
 test('a Tester (no canManageSettings) cannot set the background', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServer(db);
-  await assert.rejects(
-    () => db.updateServerAppearance({ serverId: server.id, actingDiscordId: 'tester1', backgroundStyle: '#123456' }),
-    /not permitted/i,
-  );
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    await assert.rejects(
+      () => db.updateServerAppearance({ serverId: server.id, actingDiscordId: 'tester1', backgroundStyle: '#123456' }),
+      /not permitted/i,
+    );
+  });
 });
 
 test('setting the background to null clears it back to default', async () => {

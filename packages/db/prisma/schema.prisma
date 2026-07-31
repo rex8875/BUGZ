@@ -16,7 +16,6 @@ model User {
   discordUsername String
   verifiedAt      DateTime?
   createdAt       DateTime     @default(now())
-  memberships     Membership[]
   bugReports      BugReport[]  @relation("ReportedBy")
   guestAccess     GuestAccess[]
   leaderboard     LeaderboardScore[]
@@ -47,22 +46,13 @@ model Server {
   // Separate from retestChannelId (retests) — a server may want these
   // in different channels.
   announceChannelId String?
-  // The one Discord role (if set) whose holders get full access to
-  // every command and every internal permission — checked LIVE against
-  // Discord on each check, never synced into a separate internal role
-  // grant. This is deliberately the same "linked directly to a real
-  // server role" model as the per-command CommandPermission overrides,
-  // just as a single all-commands shortcut instead of configuring each
-  // command individually.
-  adminRoleId       String?
 
   // False once the bot is kicked/removed from this Discord server. Data
   // is kept (reports, roles, members) — only dashboard visibility is
   // gated on this, so nothing is lost if the bot gets re-invited later.
   isActive        Boolean      @default(true)
   createdAt       DateTime     @default(now())
-  roles           Role[]
-  memberships     Membership[]
+  rolePermissions RolePermission[]
   bugReports      BugReport[]
   shareLinks      ShareLink[]
   guestAccess     GuestAccess[]
@@ -73,65 +63,42 @@ model Server {
   commandPermissions CommandPermission[]
 }
 
-// Custom rank defined per-server by the owner. Not hardcoded to
-// "Tester"/"Dev" — the owner names ranks and toggles permissions,
-// the system just enforces whatever they set.
-model Role {
-  id                String       @id @default(cuid())
+// Bot-granted permissions for one REAL Discord role in this server —
+// not a bot-internal role concept. There's no "membership" or "grant"
+// step: whoever holds this Discord role, checked live against Discord
+// on every permission check, gets these permissions. Remove the role
+// from someone in Discord and their access changes on the very next
+// check, automatically — matching how Dyno and Arcane both work,
+// rather than requiring a separate internal role-assignment step.
+//
+// A person can hold several Discord roles simultaneously; if more than
+// one has a row here, their effective permissions are the OR of all of
+// them (getEffectivePermissions in packages/db/src/index.js) — same
+// "any role grants it" logic Discord itself uses for its own
+// permissions.
+//
+// Hierarchy/rank-safety (e.g. "can't ban someone above your rank") is
+// derived from Discord's own live role position ordering rather than a
+// separate stored rank number — there is deliberately no rank field
+// here at all.
+model RolePermission {
+  id                String  @id @default(cuid())
   serverId          String
-  server            Server       @relation(fields: [serverId], references: [id])
-  name              String
-  rank              Int          // hierarchy position; higher = more authority, used to stop a role promoting someone to its own level or above
-  canSubmitBugs     Boolean      @default(true)
-  canViewDashboard  Boolean      @default(false)
-  canManageBugs     Boolean      @default(false)
-  canPingTesters    Boolean      @default(false)
-  canArchive        Boolean      @default(false)
-  canEditReports    Boolean      @default(false)
-  canDeleteReports  Boolean      @default(false)
-  canShareDashboard Boolean      @default(false)
-  canKickMembers    Boolean      @default(false)
-  canBanMembers     Boolean      @default(false)
-  canManageRoles    Boolean      @default(false)
-  canManageSettings Boolean      @default(false)
-  memberRoles       MemberRole[]
+  server            Server  @relation(fields: [serverId], references: [id])
+  discordRoleId     String
+  canSubmitBugs     Boolean @default(true)
+  canViewDashboard  Boolean @default(false)
+  canManageBugs     Boolean @default(false)
+  canPingTesters    Boolean @default(false)
+  canArchive        Boolean @default(false)
+  canEditReports    Boolean @default(false)
+  canDeleteReports  Boolean @default(false)
+  canShareDashboard Boolean @default(false)
+  canBanMembers     Boolean @default(false)
+  canManageRoles    Boolean @default(false)
+  canManageSettings Boolean @default(false)
 
-  @@unique([serverId, name])
-}
-
-// "Is this person a member of this server at all" — the roles they
-// actually hold live in MemberRole below, since (matching real Discord)
-// a member can hold several roles simultaneously. Holding zero roles
-// means this row gets cleaned up; a Membership existing always implies
-// at least one role.
-model Membership {
-  id       String       @id @default(cuid())
-  userId   String
-  user     User         @relation(fields: [userId], references: [id])
-  serverId String
-  server   Server       @relation(fields: [serverId], references: [id])
-  joinedAt DateTime     @default(now())
-  roles    MemberRole[]
-
-  @@unique([userId, serverId])
-}
-
-// One held role. A member can have several of these — granting/revoking
-// one is independent of whatever else they hold, exactly like Discord's
-// own role system: giving someone a lower role doesn't touch their
-// higher one. Effective permissions are the OR of every role held;
-// effective rank (used to decide what you're allowed to grant/revoke,
-// and what's too senior for someone else to touch) is the highest rank
-// among them.
-model MemberRole {
-  id           String     @id @default(cuid())
-  membershipId String
-  membership   Membership @relation(fields: [membershipId], references: [id])
-  roleId       String
-  role         Role       @relation(fields: [roleId], references: [id])
-  grantedAt    DateTime   @default(now())
-
-  @@unique([membershipId, roleId])
+  @@unique([serverId, discordRoleId])
 }
 
 // SQLite has no native enum type — Priority, Status, and access-level
@@ -142,7 +109,7 @@ model MemberRole {
 // A shareable dashboard link, scoped to one server. Lets someone who
 // isn't a member of the Discord server (a contractor, an HR reviewer)
 // still get into that server's dashboard at View or Dev level, without
-// going through the normal Role/Membership promotion path.
+// needing to hold a real Discord role that's been granted permissions.
 model ShareLink {
   id                 String           @id @default(cuid())
   serverId           String
@@ -172,10 +139,10 @@ model GuestAccess {
   @@unique([shareLinkId, userId])
 }
 
-// A discordId blocked from holding membership in this server again
-// until explicitly unbanned. Banning removes any existing Membership
-// and adds this row; promoting/inviting a banned person back is
-// refused until the ban is lifted.
+// A discordId explicitly blocked from having ANY access to this
+// server's bug tracker, regardless of what Discord roles they hold or
+// what those roles are configured to allow — an absolute override,
+// checked before role-based permissions in getEffectivePermissions.
 model BannedMember {
   id                 String   @id @default(cuid())
   serverId           String
@@ -194,8 +161,8 @@ model BannedMember {
 // high-frequency noise without much accountability value, and already
 // carry their own updatedAt.
 // A per-server, per-command override letting an owner restrict a
-// command to specific REAL Discord roles (not the bot's own internal
-// Role/rank system) — e.g. only @QA-Lead and @Moderator can run
+// command to a narrower set of REAL Discord roles than its general
+// RolePermission access — e.g. only @QA-Lead and @Moderator can run
 // /reset-score. If a command has zero rows here, it's not overridden at
 // all and falls back to the bot's existing internal permission checks,
 // exactly as before this feature existed — this is additive, not a

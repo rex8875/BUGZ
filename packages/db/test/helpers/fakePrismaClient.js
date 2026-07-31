@@ -26,8 +26,6 @@ function fakeNow() {
 const AUTO_NOW_ON_CREATE = {
   user: ['createdAt'],
   server: ['createdAt'],
-  membership: ['joinedAt'],
-  memberRole: ['grantedAt'],
   bannedMember: ['bannedAt'],
   bugReport: ['createdAt'],
   auditLogEntry: ['createdAt'],
@@ -46,18 +44,15 @@ const SCHEMA = {
   server: {
     uniques: ['id', 'discordServerId'],
     relations: {
-      roles: { type: 'hasMany', model: 'role', fk: 'serverId' },
-      memberships: { type: 'hasMany', model: 'membership', fk: 'serverId' },
+      rolePermissions: { type: 'hasMany', model: 'rolePermission', fk: 'serverId' },
     },
     defaults: { isActive: true, nextBugNumber: 1 },
   },
-  role: {
+  rolePermission: {
     uniques: ['id'],
-    compoundUniques: { serverId_name: ['serverId', 'name'] },
+    compoundUniques: { serverId_discordRoleId: ['serverId', 'discordRoleId'] },
     relations: {},
-    // Mirrors the @default(...) values in schema.prisma exactly — Role is
-    // the one model created with partial data often enough (custom roles
-    // via createRole) that silently-missing fields would be misleading.
+    // Mirrors the @default(...) values in schema.prisma exactly.
     defaults: {
       canSubmitBugs: true,
       canViewDashboard: false,
@@ -67,27 +62,9 @@ const SCHEMA = {
       canEditReports: false,
       canDeleteReports: false,
       canShareDashboard: false,
-      canKickMembers: false,
       canBanMembers: false,
       canManageRoles: false,
       canManageSettings: false,
-    },
-  },
-  membership: {
-    uniques: ['id'],
-    compoundUniques: { userId_serverId: ['userId', 'serverId'] },
-    relations: {
-      user: { type: 'belongsTo', model: 'user', fk: 'userId' },
-      server: { type: 'belongsTo', model: 'server', fk: 'serverId' },
-      roles: { type: 'hasMany', model: 'memberRole', fk: 'membershipId' },
-    },
-  },
-  memberRole: {
-    uniques: ['id'],
-    compoundUniques: { membershipId_roleId: ['membershipId', 'roleId'] },
-    relations: {
-      membership: { type: 'belongsTo', model: 'membership', fk: 'membershipId' },
-      role: { type: 'belongsTo', model: 'role', fk: 'roleId' },
     },
   },
   bannedMember: {
@@ -210,6 +187,9 @@ class Table {
       }
       if ('contains' in value) {
         return String(record[key] ?? '').toLowerCase().includes(String(value.contains).toLowerCase());
+      }
+      if ('in' in value) {
+        return Array.isArray(value.in) && value.in.some((v) => valuesEqual(record[key], v));
       }
       throw new Error(`Unsupported where operator on ${key}: ${JSON.stringify(value)}`);
     }

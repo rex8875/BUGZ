@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { getServerByDiscordId, updateServerSettings } = require('@bugtracker/db');
+const { getServerByDiscordId, setRolePermissions } = require('@bugtracker/db');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -16,10 +16,28 @@ module.exports = {
     const role = interaction.options.getRole('role');
 
     try {
-      await updateServerSettings({
+      // Just a convenience shortcut over the general role-permission
+      // system — sets every flag true for this one role, through the
+      // exact same mechanism /set-admin-role always used before the
+      // permission system was unified around real Discord roles. Not a
+      // separate bypass path anymore.
+      await setRolePermissions({
         serverId: server.id,
         actingDiscordId: interaction.user.id,
-        adminRoleId: role.id,
+        discordRoleId: role.id,
+        permissions: {
+          canSubmitBugs: true,
+          canViewDashboard: true,
+          canManageBugs: true,
+          canPingTesters: true,
+          canArchive: true,
+          canEditReports: true,
+          canDeleteReports: true,
+          canShareDashboard: true,
+          canBanMembers: true,
+          canManageRoles: true,
+          canManageSettings: true,
+        },
       });
       await interaction.reply({
         content: `Done — anyone with the ${role} role now has full access to every command and permission, checked live against Discord. This isn't a separate bot role; it's tied directly to that Discord role, so removing the role there removes access immediately.`,
