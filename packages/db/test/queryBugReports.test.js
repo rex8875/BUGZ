@@ -1,20 +1,24 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('./helpers/loadDb');
+const { withDiscordRoles } = require('./helpers/discordRoleMock');
+
+const TESTER_ROLE = 'tester-discord-role';
 
 async function setupServerWithReports(db, count = 12) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
   await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester1' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
 
-  for (let i = 0; i < count; i++) {
-    await db.createBugReport(server.id, 'tester1', {
-      title: `Bug ${i}`, description: `desc ${i} basement`, priority: 'LOW', device: 'PC',
-      evidenceLink: 'https://x.com', f9Link: 'https://x.com',
-    });
-  }
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    for (let i = 0; i < count; i++) {
+      await db.createBugReport(server.id, 'tester1', {
+        title: `Bug ${i}`, description: `desc ${i} basement`, priority: 'LOW', device: 'PC',
+        evidenceLink: 'https://x.com', f9Link: 'https://x.com',
+      });
+    }
+  });
   return server;
 }
 
@@ -40,8 +44,6 @@ test('queryBugReports excludes archived reports by default ("only non-archived, 
   const server = await setupServerWithReports(db, 3);
   const all = await db.queryBugReports(server.id, { pageSize: 10 });
 
-  // archiving requires a terminal status first (canManageBugs), then the
-  // archive itself (canArchive) — both granted to the owner by default.
   await db.updateBugReport({ serverId: server.id, actingDiscordId: 'owner1', bugReportId: all.reports[0].id, requestedChanges: { status: 'FIXED' } });
   await db.updateBugReport({ serverId: server.id, actingDiscordId: 'owner1', bugReportId: all.reports[0].id, requestedChanges: { archivedAt: new Date() } });
 
@@ -66,9 +68,9 @@ test('queryBugReports filters by exact reporterDiscordId (for /my-bugs and /bugs
   const { db } = loadDbWithFakePrisma();
   const server = await setupServerWithReports(db, 3);
   await db.verifyUser({ discordId: 'tester2', discordUsername: 'Tester2' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester2', roleId: testerRole.id });
-  await db.createBugReport(server.id, 'tester2', { title: 'Someone else bug', description: 'd', priority: 'LOW', device: 'PC', evidenceLink: 'https://x.com', f9Link: 'https://x.com' });
+  await withDiscordRoles({ tester2: [TESTER_ROLE] }, async () => {
+    await db.createBugReport(server.id, 'tester2', { title: 'Someone else bug', description: 'd', priority: 'LOW', device: 'PC', evidenceLink: 'https://x.com', f9Link: 'https://x.com' });
+  });
 
   const tester1Reports = await db.queryBugReports(server.id, { reporterDiscordId: 'tester1', pageSize: 10 });
   assert.equal(tester1Reports.totalCount, 3);
@@ -81,8 +83,6 @@ test('queryBugReports date filters (before/on/after) work on createdAt', async (
   const { db } = loadDbWithFakePrisma();
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'owner1', roleId: testerRole.id });
 
   const report = await db.createBugReport(server.id, 'owner1', {
     title: 'Dated bug', description: 'd', priority: 'LOW', device: 'PC', evidenceLink: 'https://x.com', f9Link: 'https://x.com',
@@ -101,7 +101,10 @@ test('queryBugReports date filters (before/on/after) work on createdAt', async (
 test('queryBugReports still shows reports from a reporter who has since left the server (data preserved)', async () => {
   const { db } = loadDbWithFakePrisma();
   const server = await setupServerWithReports(db, 2);
-  await db.removeMembershipOnLeave(server.id, 'tester1');
+  // Leaving no longer touches any internal state — permissions are live
+  // and reports are attached to the User row, not a Membership. The
+  // only explicit cleanup on leave is leaderboard-hiding.
+  await db.hideLeaverFromLeaderboard(server.id, 'tester1');
 
   const result = await db.queryBugReports(server.id, { pageSize: 10 });
   assert.equal(result.totalCount, 2, 'leaving the server must not remove their reports from list views');

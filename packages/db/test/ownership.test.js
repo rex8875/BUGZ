@@ -1,19 +1,43 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('./helpers/loadDb');
+const { withDiscordRoles } = require('./helpers/discordRoleMock');
 
-test('createServerOnJoin seeds Owner (full perms) and Tester (minimal) roles', async () => {
+test('createServerOnJoin does not seed any roles — permissions come entirely from configuring real Discord roles later', async () => {
   const { db } = loadDbWithFakePrisma();
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
-  const roles = await db.listRoles(server.id);
+  const configured = await db.listRolePermissions(server.id);
+  assert.equal(configured.length, 0, 'nothing should be pre-configured; there is no internal default role set anymore');
+});
 
-  const owner = roles.find((r) => r.name === 'Owner');
-  const tester = roles.find((r) => r.name === 'Tester');
+test('the recorded owner has full permissions automatically, with no role grant and no live Discord call needed', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
+  await db.verifyUser({ discordId: 'owner1', discordUsername: 'OwnerName' });
 
-  assert.ok(owner.canManageRoles && owner.canManageSettings && owner.canBanMembers && owner.canKickMembers && owner.canShareDashboard);
-  assert.equal(tester.canSubmitBugs, true);
-  assert.equal(tester.canViewDashboard, false, 'testers stay Discord-only by design, not dashboard-side');
-  assert.equal(tester.canManageBugs, false);
+  const realFetch = global.fetch;
+  let fetchCalls = 0;
+  global.fetch = async () => { fetchCalls++; return { ok: true, status: 200, json: async () => ({ roles: [] }) }; };
+  try {
+    const perms = await db.getEffectivePermissions(server.id, 'owner1');
+    assert.equal(perms.canManageSettings, true);
+    assert.equal(perms.canBanMembers, true);
+    assert.equal(perms.canShareDashboard, true);
+    assert.equal(fetchCalls, 0, 'the owner fast-path should never need a live Discord call');
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
+test('someone who is NOT the recorded owner, and holds no configured role, has no permissions at all', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
+  await db.verifyUser({ discordId: 'rando', discordUsername: 'Rando' });
+
+  await withDiscordRoles({ rando: [] }, async () => {
+    const perms = await db.getEffectivePermissions(server.id, 'rando');
+    assert.equal(perms, null);
+  });
 });
 
 test('re-joining an existing server updates the name but never silently changes the recorded owner', async () => {
@@ -23,26 +47,6 @@ test('re-joining an existing server updates the name but never silently changes 
 
   assert.equal(updated.name, 'Renamed');
   assert.equal(updated.ownerDiscordId, 'owner1', 'ownership must stay sticky even if the bot is re-invited by someone else');
-});
-
-test('verifying auto-claims Owner membership if you are the recorded owner of an unclaimed server', async () => {
-  const { db } = loadDbWithFakePrisma();
-  const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
-
-  await db.verifyUser({ discordId: 'owner1', discordUsername: 'OwnerName' });
-
-  const membership = await db.getMembership(server.id, 'owner1');
-  assert.equal(membership.roles[0].role.name, 'Owner');
-});
-
-test('verifying does NOT grant Owner to someone who is not the recorded owner', async () => {
-  const { db } = loadDbWithFakePrisma();
-  await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
-
-  await db.verifyUser({ discordId: 'rando', discordUsername: 'Rando' });
-  const server = await db.getServerByDiscordId('g1');
-  const membership = await db.getMembership(server.id, 'rando');
-  assert.equal(membership, null);
 });
 
 test('only the current owner can transfer ownership', async () => {
@@ -66,7 +70,7 @@ test('cannot transfer ownership to someone who has not verified', async () => {
   );
 });
 
-test('successful transfer updates ownerDiscordId and grants the new owner the Owner role', async () => {
+test('successful transfer updates ownerDiscordId, and the new owner immediately has full permissions with no role grant needed', async () => {
   const { db } = loadDbWithFakePrisma();
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'newowner', discordUsername: 'NewOwner' });
@@ -76,8 +80,11 @@ test('successful transfer updates ownerDiscordId and grants the new owner the Ow
   const updatedServer = await db.getServerById(server.id);
   assert.equal(updatedServer.ownerDiscordId, 'newowner');
 
-  const newMembership = await db.getMembership(server.id, 'newowner');
-  assert.equal(newMembership.roles[0].role.name, 'Owner');
+  const newOwnerPerms = await db.getEffectivePermissions(server.id, 'newowner');
+  assert.equal(newOwnerPerms.canManageSettings, true);
+
+  const oldOwnerPerms = await withDiscordRoles({ owner1: [] }, () => db.getEffectivePermissions(server.id, 'owner1'));
+  assert.equal(oldOwnerPerms, null, 'the previous owner loses full access immediately — nothing to revoke, the check is live');
 });
 
 test('after transfer, the previous owner can no longer transfer ownership again', async () => {

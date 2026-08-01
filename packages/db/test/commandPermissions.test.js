@@ -1,13 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('./helpers/loadDb');
+const { withDiscordRoles } = require('./helpers/discordRoleMock');
+
+const TESTER_ROLE = 'tester-discord-role';
 
 async function setupServer(db) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
   await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
   return { server };
 }
 
@@ -98,10 +100,12 @@ test('re-saving the exact same override twice in a row is idempotent, not an err
 test('a Tester (no canManageSettings) cannot configure command permissions', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupServer(db);
-  await assert.rejects(
-    () => db.setCommandPermissions({ serverId: server.id, actingDiscordId: 'tester1', commandName: 'reset-score', discordRoleIds: ['role-a'] }),
-    /not permitted/i,
-  );
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    await assert.rejects(
+      () => db.setCommandPermissions({ serverId: server.id, actingDiscordId: 'tester1', commandName: 'reset-score', discordRoleIds: ['role-a'] }),
+      /not permitted/i,
+    );
+  });
 });
 
 test('listCommandPermissions groups all configured overrides by command name', async () => {

@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('./helpers/loadDb');
+const { withDiscordRoles } = require('./helpers/discordRoleMock');
 
 async function setupTwoServers(db) {
   const serverA = await db.createServerOnJoin({ discordServerId: 'gA', name: 'Server A', ownerDiscordId: 'ownerA' });
@@ -38,46 +39,44 @@ test('a leaked/guessed report id from server A cannot be mutated through server 
     /not found/i,
   );
 
-  // Confirm it's genuinely untouched from server A's own perspective
   const stillThere = await db.getBugReport(serverA.id, report.id);
   assert.equal(stillThere.status, 'NEW');
 });
 
-test('the same Discord person can hold completely different roles in two different servers', async () => {
+test('the same Discord person, and even the SAME literal Discord role id, gives completely different permissions in two different servers', async () => {
   const { db } = loadDbWithFakePrisma();
   const { serverA, serverB } = await setupTwoServers(db);
   await db.verifyUser({ discordId: 'multiserver', discordUsername: 'MultiServer' });
 
-  const testerRoleA = (await db.listRoles(serverA.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver', roleId: testerRoleA.id });
+  const SHARED_ROLE_ID = 'shared-role-id'; // deliberately the same string in both servers
+  await db.setRolePermissions({ serverId: serverA.id, actingDiscordId: 'ownerA', discordRoleId: SHARED_ROLE_ID, permissions: { canSubmitBugs: true } });
+  await db.setRolePermissions({ serverId: serverB.id, actingDiscordId: 'ownerB', discordRoleId: SHARED_ROLE_ID, permissions: { canManageBugs: true, canManageRoles: true } });
 
-  // In server B, promote them all the way to Owner-tier via a custom role
-  const leadRoleB = await db.createRole({ serverId: serverB.id, actingDiscordId: 'ownerB', name: 'Lead', rank: 90, permissions: { canManageBugs: true, canManageRoles: true } });
-  await db.grantRole({ serverId: serverB.id, actingDiscordId: 'ownerB', targetDiscordId: 'multiserver', roleId: leadRoleB.id });
+  await withDiscordRoles({ multiserver: [SHARED_ROLE_ID] }, async () => {
+    const permsA = await db.getEffectivePermissions(serverA.id, 'multiserver');
+    const permsB = await db.getEffectivePermissions(serverB.id, 'multiserver');
 
-  const permsA = await db.getEffectivePermissions(serverA.id, 'multiserver');
-  const permsB = await db.getEffectivePermissions(serverB.id, 'multiserver');
-
-  assert.equal(permsA.canManageBugs, false, 'just a Tester in server A');
-  assert.equal(permsB.canManageBugs, true, 'a Lead in server B');
-  assert.equal(permsB.canManageRoles, true);
+    assert.equal(permsA.canManageBugs, false, 'in server A this role id was only configured for canSubmitBugs');
+    assert.equal(permsB.canManageBugs, true, 'in server B the identical role id string was configured completely differently');
+    assert.equal(permsB.canManageRoles, true);
+  });
 });
 
-test('a kick/ban in one server has zero effect on the same person\'s standing in another server', async () => {
+test('a ban in one server has zero effect on the same person\'s standing in another server', async () => {
   const { db } = loadDbWithFakePrisma();
   const { serverA, serverB } = await setupTwoServers(db);
   await db.verifyUser({ discordId: 'multiserver', discordUsername: 'MultiServer' });
-
-  const testerRoleA = (await db.listRoles(serverA.id)).find((r) => r.name === 'Tester');
-  const testerRoleB = (await db.listRoles(serverB.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver', roleId: testerRoleA.id });
-  await db.grantRole({ serverId: serverB.id, actingDiscordId: 'ownerB', targetDiscordId: 'multiserver', roleId: testerRoleB.id });
+  await db.setRolePermissions({ serverId: serverA.id, actingDiscordId: 'ownerA', discordRoleId: 'role-a', permissions: { canSubmitBugs: true } });
+  await db.setRolePermissions({ serverId: serverB.id, actingDiscordId: 'ownerB', discordRoleId: 'role-b', permissions: { canSubmitBugs: true } });
 
   await db.banMember({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver' });
 
   assert.equal(await db.isBanned(serverA.id, 'multiserver'), true);
   assert.equal(await db.isBanned(serverB.id, 'multiserver'), false, 'a ban in server A must not leak into server B');
-  assert.ok(await db.getMembership(serverB.id, 'multiserver'), 'membership in server B should be completely untouched');
+
+  await withDiscordRoles({ multiserver: ['role-b'] }, async () => {
+    assert.ok(await db.getEffectivePermissions(serverB.id, 'multiserver'), 'access in server B should be completely untouched');
+  });
 });
 
 test('a share link created for server A grants no access whatsoever to server B', async () => {
@@ -87,22 +86,26 @@ test('a share link created for server A grants no access whatsoever to server B'
   await db.verifyUser({ discordId: 'guest1', discordUsername: 'Guest' });
   await db.redeemShareLink({ shareLinkId: link.id, discordId: 'guest1' });
 
-  assert.ok((await db.getEffectivePermissions(serverA.id, 'guest1'))?.canManageBugs, 'sanity check: the link works for server A');
-  assert.equal(await db.getEffectivePermissions(serverB.id, 'guest1'), null, 'the same guest must have zero standing in server B');
+  await withDiscordRoles({ guest1: [] }, async () => {
+    assert.ok((await db.getEffectivePermissions(serverA.id, 'guest1'))?.canManageBugs, 'sanity check: the link works for server A');
+    assert.equal(await db.getEffectivePermissions(serverB.id, 'guest1'), null, 'the same guest must have zero standing in server B');
+  });
 });
 
 test('leaderboard scores never mix between servers, even for the same person', async () => {
   const { db } = loadDbWithFakePrisma();
   const { serverA, serverB } = await setupTwoServers(db);
   await db.verifyUser({ discordId: 'multiserver', discordUsername: 'MultiServer' });
-  const testerRoleA = (await db.listRoles(serverA.id)).find((r) => r.name === 'Tester');
-  const testerRoleB = (await db.listRoles(serverB.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'multiserver', roleId: testerRoleA.id });
-  await db.grantRole({ serverId: serverB.id, actingDiscordId: 'ownerB', targetDiscordId: 'multiserver', roleId: testerRoleB.id });
+  await db.setRolePermissions({ serverId: serverA.id, actingDiscordId: 'ownerA', discordRoleId: 'role-a', permissions: { canSubmitBugs: true } });
+  await db.setRolePermissions({ serverId: serverB.id, actingDiscordId: 'ownerB', discordRoleId: 'role-b', permissions: { canSubmitBugs: true } });
 
-  await db.createBugReport(serverA.id, 'multiserver', { title: 'a1', description: 'd', priority: 'LOW', status: 'NEW' });
-  await db.createBugReport(serverA.id, 'multiserver', { title: 'a2', description: 'd', priority: 'LOW', status: 'NEW' });
-  await db.createBugReport(serverB.id, 'multiserver', { title: 'b1', description: 'd', priority: 'LOW', status: 'NEW' });
+  await withDiscordRoles({ multiserver: ['role-a'] }, async () => {
+    await db.createBugReport(serverA.id, 'multiserver', { title: 'a1', description: 'd', priority: 'LOW', status: 'NEW' });
+    await db.createBugReport(serverA.id, 'multiserver', { title: 'a2', description: 'd', priority: 'LOW', status: 'NEW' });
+  });
+  await withDiscordRoles({ multiserver: ['role-b'] }, async () => {
+    await db.createBugReport(serverB.id, 'multiserver', { title: 'b1', description: 'd', priority: 'LOW', status: 'NEW' });
+  });
 
   const scoreA = (await db.getLeaderboard(serverA.id)).find((s) => s.user.discordId === 'multiserver');
   const scoreB = (await db.getLeaderboard(serverB.id)).find((s) => s.user.discordId === 'multiserver');
@@ -113,12 +116,13 @@ test('leaderboard scores never mix between servers, even for the same person', a
 
 test('listAccessibleServers only returns servers the person actually has standing in', async () => {
   const { db } = loadDbWithFakePrisma();
-  const { serverA, serverB } = await setupTwoServers(db);
+  const { serverA } = await setupTwoServers(db);
   await db.verifyUser({ discordId: 'onlyA', discordUsername: 'OnlyA' });
-  const testerRoleA = (await db.listRoles(serverA.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: serverA.id, actingDiscordId: 'ownerA', targetDiscordId: 'onlyA', roleId: testerRoleA.id });
+  await db.setRolePermissions({ serverId: serverA.id, actingDiscordId: 'ownerA', discordRoleId: 'role-a', permissions: { canSubmitBugs: true } });
 
-  const accessible = await db.listAccessibleServers('onlyA');
-  assert.equal(accessible.length, 1);
-  assert.equal(accessible[0].server.id, serverA.id);
+  await withDiscordRoles({ onlyA: ['role-a'] }, async () => {
+    const accessible = await db.listAccessibleServers('onlyA');
+    assert.equal(accessible.length, 1);
+    assert.equal(accessible[0].server.id, serverA.id);
+  });
 });
