@@ -1,6 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('./helpers/loadDb');
+const { withDiscordRoles } = require('./helpers/discordRoleMock');
+
+// "Kick" doesn't exist anymore — there's nothing internal left to
+// remove (permissions are checked live against Discord, not granted).
+// Ban is the one moderation action left: an absolute app-level block,
+// independent of whatever Discord roles someone holds. Rank-safety for
+// ban now derives from Discord's own live role position ordering.
+const DEV_ROLE = 'dev-role';
+const PEER_ROLE = 'peer-role'; // same live position as DEV_ROLE — a peer, not a subordinate
+const TESTER_ROLE = 'tester-role';
 
 async function setupTieredServer(db) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
@@ -9,128 +19,108 @@ async function setupTieredServer(db) {
   await db.verifyUser({ discordId: 'peer1', discordUsername: 'Peer' });
   await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester' });
 
-  const devRole = await db.createRole({
-    serverId: server.id, actingDiscordId: 'owner1', name: 'Dev', rank: 50,
-    permissions: { canKickMembers: true, canBanMembers: true },
-  });
-  const peerRole = await db.createRole({ serverId: server.id, actingDiscordId: 'owner1', name: 'Peer', rank: 50, permissions: {} });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'dev1', roleId: devRole.id });
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'peer1', roleId: peerRole.id });
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: DEV_ROLE, permissions: { canBanMembers: true, canViewDashboard: true } });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: PEER_ROLE, permissions: {} });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
 
   return { server };
 }
 
-test('kickMember requires canKickMembers', async () => {
+// Position 50 for dev1/peer1 (same tier), 10 for tester1 (junior).
+function tieredRolePositions(mock) {
+  mock.setRolePosition(DEV_ROLE, 50);
+  mock.setRolePosition(PEER_ROLE, 50);
+  mock.setRolePosition(TESTER_ROLE, 10);
+}
+
+test('banMember requires canBanMembers', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupTieredServer(db);
-  await db.verifyUser({ discordId: 'norole', discordUsername: 'NoRole' }); // has no membership, so definitely no canKickMembers
-  await assert.rejects(() => db.kickMember({ serverId: server.id, actingDiscordId: 'norole', targetDiscordId: 'tester1' }), /Not permitted/);
+  await db.verifyUser({ discordId: 'norole', discordUsername: 'NoRole' });
+  await withDiscordRoles({ norole: [], tester1: [TESTER_ROLE] }, async (mock) => {
+    tieredRolePositions(mock);
+    await assert.rejects(() => db.banMember({ serverId: server.id, actingDiscordId: 'norole', targetDiscordId: 'tester1' }), /Not permitted/);
+  });
 });
 
-test('kickMember cannot touch someone at or above your own rank', async () => {
+test('banMember cannot touch someone at or above your own live Discord role position', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupTieredServer(db);
-  await assert.rejects(() => db.kickMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'peer1' }), /at or above your own rank/);
+  await withDiscordRoles({ dev1: [DEV_ROLE], peer1: [PEER_ROLE] }, async (mock) => {
+    tieredRolePositions(mock);
+    await assert.rejects(() => db.banMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'peer1' }), /at or above your own role position/);
+  });
 });
 
-test('kickMember cannot ever target the server owner', async () => {
+test('banMember cannot ever target the server owner', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupTieredServer(db);
-  await assert.rejects(() => db.kickMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'owner1' }), /server owner/);
-});
-
-test('kickMember succeeds against a genuinely lower-rank target and removes their membership', async () => {
-  const { db } = loadDbWithFakePrisma();
-  const { server } = await setupTieredServer(db);
-  await db.kickMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1' });
-  const membership = await db.getMembership(server.id, 'tester1');
-  assert.equal(membership, null);
-});
-
-test('kicking does NOT create a ban — the person can be re-promoted without unbanning', async () => {
-  const { db } = loadDbWithFakePrisma();
-  const { server } = await setupTieredServer(db);
-  await db.kickMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1' });
-
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  const result = await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
-  assert.ok(result, 're-adding a kicked (not banned) person should work with no unban step');
-});
-
-test('banMember cannot touch someone at or above your own rank, or the owner', async () => {
-  const { db } = loadDbWithFakePrisma();
-  const { server } = await setupTieredServer(db);
-  await assert.rejects(() => db.banMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'peer1' }), /at or above your own rank/);
   await assert.rejects(() => db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'owner1' }), /server owner/);
 });
 
-test('banMember removes membership AND blocks rejoining until unbanned', async () => {
+test('cannot ban yourself', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupTieredServer(db);
-  await db.banMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1', reason: 'spam' });
-
-  assert.equal(await db.getMembership(server.id, 'tester1'), null);
-  assert.equal(await db.isBanned(server.id, 'tester1'), true);
-
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await assert.rejects(
-    () => db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id }),
-    /banned/,
-  );
-
-  await db.unbanMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
-  assert.equal(await db.isBanned(server.id, 'tester1'), false);
+  await withDiscordRoles({ dev1: [DEV_ROLE] }, async (mock) => {
+    tieredRolePositions(mock);
+    await assert.rejects(() => db.banMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'dev1' }), /yourself/);
+  });
 });
 
-test('banned user cannot submit a bug report, even if somehow still holding a membership row', async () => {
+test('banMember against a genuinely lower-position target succeeds and blocks them', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupTieredServer(db);
+  await withDiscordRoles({ dev1: [DEV_ROLE], tester1: [TESTER_ROLE] }, async (mock) => {
+    tieredRolePositions(mock);
+    await db.banMember({ serverId: server.id, actingDiscordId: 'dev1', targetDiscordId: 'tester1', reason: 'spam' });
+    assert.equal(await db.isBanned(server.id, 'tester1'), true);
+  });
+});
+
+test('a ban is an absolute override on getEffectivePermissions, regardless of Discord roles held', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupTieredServer(db);
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    assert.ok(await db.getEffectivePermissions(server.id, 'tester1'), 'sanity check before ban');
+  });
+
+  await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
+
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    assert.equal(
+      await db.getEffectivePermissions(server.id, 'tester1'),
+      null,
+      'banned must override even a currently-held, otherwise-valid role',
+    );
+  });
+});
+
+test('banned user cannot submit a bug report even though the role check would otherwise pass', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupTieredServer(db);
   await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
-  await assert.rejects(
-    () => db.createBugReport(server.id, 'tester1', { title: 't', description: 'd', priority: 'LOW', status: 'NEW' }),
-    /banned/,
-  );
+
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    await assert.rejects(
+      () => db.createBugReport(server.id, 'tester1', { title: 't', description: 'd', priority: 'LOW', status: 'NEW' }),
+      /banned/,
+    );
+  });
 });
 
-test('kicking a member immediately removes their dashboard access entirely (getEffectivePermissions returns null)', async () => {
+test('unbanning restores access immediately if they still hold the role — nothing was ever taken away from the role itself, only blocked', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupTieredServer(db);
-  await db.verifyUser({ discordId: 'devview', discordUsername: 'DevView' });
-  const devRole = await db.createRole({ serverId: server.id, actingDiscordId: 'owner1', name: 'DevView', rank: 20, permissions: { canViewDashboard: true, canManageBugs: true } });
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview', roleId: devRole.id });
-  assert.ok(await db.getEffectivePermissions(server.id, 'devview'), 'sanity check before kick');
+  await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
+  await db.unbanMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
 
-  await db.kickMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview' });
-
-  assert.equal(await db.getEffectivePermissions(server.id, 'devview'), null, 'kicked member should have zero dashboard access, not just be missing from the member list');
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    const perms = await db.getEffectivePermissions(server.id, 'tester1');
+    assert.ok(perms?.canSubmitBugs, 'access should resume immediately — the Tester role config was never touched by the ban/unban cycle');
+  });
 });
 
-test('banning a member immediately removes their dashboard access, and unbanning alone does NOT restore it (they need a role granted again first)', async () => {
-  const { db } = loadDbWithFakePrisma();
-  const { server } = await setupTieredServer(db);
-  await db.verifyUser({ discordId: 'devview2', discordUsername: 'DevView2' });
-  const devRole = await db.createRole({ serverId: server.id, actingDiscordId: 'owner1', name: 'DevView2', rank: 20, permissions: { canViewDashboard: true } });
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview2', roleId: devRole.id });
-
-  await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview2' });
-  assert.equal(await db.getEffectivePermissions(server.id, 'devview2'), null);
-
-  await db.unbanMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview2' });
-  assert.equal(
-    await db.getEffectivePermissions(server.id, 'devview2'),
-    null,
-    'unbanning lifts the block on re-adding them, but does not by itself restore the roles that were stripped on ban',
-  );
-
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'devview2', roleId: devRole.id });
-  assert.ok(await db.getEffectivePermissions(server.id, 'devview2'), 'access resumes once a role is actually granted again post-unban');
-});
-
-test('listBannedMembers and listMembers reflect kicks/bans correctly', async () => {
-
+test('listBannedMembers reflects bans correctly, scoped per server', async () => {
   const { db } = loadDbWithFakePrisma();
   const { server } = await setupTieredServer(db);
   await db.banMember({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', reason: 'spam' });
@@ -139,7 +129,4 @@ test('listBannedMembers and listMembers reflect kicks/bans correctly', async () 
   assert.equal(banned.length, 1);
   assert.equal(banned[0].discordId, 'tester1');
   assert.equal(banned[0].reason, 'spam');
-
-  const members = await db.listMembers(server.id);
-  assert.ok(!members.some((m) => m.user.discordId === 'tester1'), 'banned member should no longer appear in the member list');
 });

@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('./helpers/loadDb');
+const { withDiscordRoles } = require('./helpers/discordRoleMock');
+
+const TESTER_ROLE = 'tester-discord-role';
 
 async function setupServer(db) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
@@ -78,13 +81,13 @@ test('listMyBugReports returns only the calling user\'s own reports in this serv
   const { server } = await setupServer(db);
   await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester1' });
   await db.verifyUser({ discordId: 'tester2', discordUsername: 'Tester2' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester2', roleId: testerRole.id });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
 
-  await db.createBugReport(server.id, 'tester1', { title: 'mine-1', description: 'd', priority: 'LOW', status: 'NEW' });
-  await db.createBugReport(server.id, 'tester2', { title: 'not-mine', description: 'd', priority: 'LOW', status: 'NEW' });
-  await db.createBugReport(server.id, 'tester1', { title: 'mine-2', description: 'd', priority: 'LOW', status: 'NEW' });
+  await withDiscordRoles({ tester1: [TESTER_ROLE], tester2: [TESTER_ROLE] }, async () => {
+    await db.createBugReport(server.id, 'tester1', { title: 'mine-1', description: 'd', priority: 'LOW', status: 'NEW' });
+    await db.createBugReport(server.id, 'tester2', { title: 'not-mine', description: 'd', priority: 'LOW', status: 'NEW' });
+    await db.createBugReport(server.id, 'tester1', { title: 'mine-2', description: 'd', priority: 'LOW', status: 'NEW' });
+  });
 
   const mine = await db.listMyBugReports(server.id, 'tester1');
   assert.equal(mine.length, 2);
