@@ -452,10 +452,22 @@ async function setRolePermissions({ serverId, actingDiscordId, discordRoleId, pe
     if (targetPos >= actingPos) throw new Error('Cannot configure a role at or above your own role position.');
   }
 
+  // On first-time creation of a role's config, any flag the caller
+  // didn't explicitly mention must land as false, not silently fall
+  // through to schema.prisma's own @default(true) on canSubmitBugs.
+  // The dashboard's role editor always sends every flag explicitly, so
+  // this only matters for partial API calls — but a partial call on a
+  // brand-new role should never grant more than it asked for.
+  const explicitDefaults = {
+    canSubmitBugs: false, canViewDashboard: false, canManageBugs: false, canPingTesters: false,
+    canArchive: false, canEditReports: false, canDeleteReports: false, canShareDashboard: false,
+    canBanMembers: false, canManageRoles: false, canManageSettings: false,
+  };
+
   const result = await prisma.rolePermission.upsert({
     where: { serverId_discordRoleId: { serverId, discordRoleId } },
     update: permissions,
-    create: { serverId, discordRoleId, ...permissions },
+    create: { serverId, discordRoleId, ...explicitDefaults, ...permissions },
   });
   await logAction(serverId, actingDiscordId, 'ROLE_PERMISSIONS_UPDATED', { discordRoleId });
   return result;

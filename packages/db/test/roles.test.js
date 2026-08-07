@@ -168,3 +168,35 @@ test('listRolePermissions returns exactly what was configured, nothing extra', a
   assert.equal(all.length, 3);
   assert.deepEqual(all.map((r) => r.discordRoleId).sort(), [DEV_ROLE, PEER_ROLE, TESTER_ROLE].sort());
 });
+
+test('creating a role config with a partial permissions object leaves every unmentioned flag false — schema defaults must not leak through', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const server = await db.createServerOnJoin({ discordServerId: 'gPartial', name: 'Partial', ownerDiscordId: 'owner1' });
+  await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
+
+  // Deliberately omits canSubmitBugs (which carries a schema-level
+  // @default(true)) to make sure setRolePermissions doesn't let that
+  // default leak into a freshly-created row just because the caller
+  // didn't mention the field. A partial grant should never imply more
+  // access than it explicitly asked for.
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: 'quiet-role', permissions: { canManageSettings: true } });
+
+  const [row] = await db.listRolePermissions(server.id);
+  assert.equal(row.canManageSettings, true);
+  assert.equal(row.canSubmitBugs, false, 'omitted fields on a new row must default to false, not the schema default');
+  assert.equal(row.canViewDashboard, false);
+});
+
+test('updating an existing role config with a partial permissions object only touches the mentioned flags, leaving the rest untouched', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const server = await db.createServerOnJoin({ discordServerId: 'gPartialUpdate', name: 'PartialUpdate', ownerDiscordId: 'owner1' });
+  await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
+
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: 'r1', permissions: { canSubmitBugs: true, canViewDashboard: true } });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: 'r1', permissions: { canManageBugs: true } });
+
+  const [row] = await db.listRolePermissions(server.id);
+  assert.equal(row.canSubmitBugs, true, 'a partial update must not reset previously-set flags');
+  assert.equal(row.canViewDashboard, true);
+  assert.equal(row.canManageBugs, true);
+});
