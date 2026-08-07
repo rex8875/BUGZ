@@ -34,8 +34,12 @@ test('/set-admin-role stores the real Discord role id and confirms it links dire
     await cmd.execute(interaction);
 
     assert.match(interaction._reply.content, /full access/i);
-    const updated = await dbModule.getServerByDiscordId('guild-1');
-    assert.equal(updated.adminRoleId, 'tester-role-real-id');
+    const server = await dbModule.getServerByDiscordId('guild-1');
+    const configured = await dbModule.listRolePermissions(server.id);
+    const grant = configured.find((r) => r.discordRoleId === 'tester-role-real-id');
+    assert.ok(grant, 'the real Discord role id should have a permission row now');
+    assert.equal(grant.canManageSettings, true, 'set-admin-role should grant every permission flag, not a separate adminRoleId');
+    assert.equal(grant.canBanMembers, true);
   } finally {
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];

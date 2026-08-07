@@ -3,9 +3,22 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const request = require('supertest');
 
-function withMockedDiscordFetch(rolesResponse, commandsResponse, fn) {
+const TESTER_ROLE = 'tester-discord-role';
+
+// Combines the "which Discord roles does this person hold" lookup
+// (used live by getEffectivePermissions/req.perms) with the guild
+// roles list and application commands list (used by the
+// command-permissions route itself) behind one fetch mock, since a
+// single request against this route exercises all three.
+function withMockedDiscordFetch({ memberRoles = {}, rolesResponse = [], commandsResponse = [] }, fn) {
   const realFetch = global.fetch;
   global.fetch = async (url) => {
+    const memberMatch = String(url).match(/\/guilds\/([^/]+)\/members\/([^/]+)$/);
+    if (memberMatch) {
+      const discordId = memberMatch[2];
+      if (!(discordId in memberRoles)) return { ok: false, status: 404, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ roles: memberRoles[discordId] }) };
+    }
     if (String(url).includes('/roles')) return { ok: true, status: 200, json: async () => rolesResponse };
     if (String(url).includes('/commands')) return { ok: true, status: 200, json: async () => commandsResponse };
     throw new Error(`Unexpected fetch in test: ${url}`);
@@ -43,8 +56,7 @@ async function seedServer(db) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
   await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
   return server;
 }
 
@@ -62,7 +74,9 @@ test('GET command-permissions returns real Discord roles (minus @everyone) and r
     ];
     const commandsResponse = [{ name: 'reset-score', description: "Reset someone's leaderboard score" }, { name: 'take-role', description: 'Remove a role' }];
 
-    await withMockedDiscordFetch(rolesResponse, commandsResponse, async () => {
+    // owner1 bypasses the live role check entirely (Server.ownerDiscordId),
+    // so no memberRoles entry is needed for them here.
+    await withMockedDiscordFetch({ rolesResponse, commandsResponse }, async () => {
       const res = await request(app).get(`/api/servers/${server.id}/command-permissions`);
       assert.equal(res.status, 200);
       assert.equal(res.body.roles.length, 2, '@everyone must be filtered out');
@@ -81,7 +95,8 @@ test('GET command-permissions is forbidden for someone without canManageSettings
   try {
     const server = await seedServer(db);
     const app = buildTestApp(router, 'tester1');
-    await withMockedDiscordFetch([], [], async () => {
+    // tester1 holds no role configured with canManageSettings.
+    await withMockedDiscordFetch({ memberRoles: { tester1: [TESTER_ROLE] } }, async () => {
       const res = await request(app).get(`/api/servers/${server.id}/command-permissions`);
       assert.equal(res.status, 403);
     });
@@ -116,10 +131,12 @@ test('PATCH command-permissions is forbidden for someone without canManageSettin
   try {
     const server = await seedServer(db);
     const app = buildTestApp(router, 'tester1');
-    const res = await request(app)
-      .patch(`/api/servers/${server.id}/command-permissions/reset-score`)
-      .send({ discordRoleIds: ['role-a'] });
-    assert.equal(res.status, 403);
+    await withMockedDiscordFetch({ memberRoles: { tester1: [TESTER_ROLE] } }, async () => {
+      const res = await request(app)
+        .patch(`/api/servers/${server.id}/command-permissions/reset-score`)
+        .send({ discordRoleIds: ['role-a'] });
+      assert.equal(res.status, 403);
+    });
   } finally {
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];

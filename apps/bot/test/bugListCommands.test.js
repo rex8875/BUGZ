@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { installDiscordRoleMock } = require('../../../packages/db/test/helpers/discordRoleMock');
+
+const TESTER_ROLE = 'tester-discord-role';
 
 function loadWithFakeDb(handlerRelPath) {
   const { createFakePrismaClient } = require('../../../packages/db/test/helpers/fakePrismaClient');
@@ -29,12 +32,12 @@ function loadWithFakeDb(handlerRelPath) {
   return { handler, dbModule, dbModulePath, originalDbCache };
 }
 
-async function seed(dbModule, { reportCount = 7 } = {}) {
+async function seed(dbModule, roleMock, { reportCount = 7 } = {}) {
   const server = await dbModule.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await dbModule.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
   await dbModule.verifyUser({ discordId: 'tester1', discordUsername: 'Tester1' });
-  const testerRole = (await dbModule.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await dbModule.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
+  await dbModule.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true, canViewDashboard: true } });
+  roleMock.setMemberRoles('tester1', [TESTER_ROLE]);
   for (let i = 0; i < reportCount; i++) {
     await dbModule.createBugReport(server.id, 'tester1', {
       title: `Bug ${i}`, description: 'd', priority: 'LOW', device: 'PC', evidenceLink: 'https://x.com', f9Link: 'https://x.com',
@@ -45,8 +48,9 @@ async function seed(dbModule, { reportCount = 7 } = {}) {
 
 test('/my-bugs shows only the caller\'s reports, paginated, with a Next button when there is a second page', async () => {
   const { handler, dbModule, dbModulePath, originalDbCache } = loadWithFakeDb('../src/commands/my-bugs.js');
+  const roleMock = installDiscordRoleMock();
   try {
-    await seed(dbModule, { reportCount: 7 }); // pageSize is 5, so 7 reports = 2 pages
+    await seed(dbModule, roleMock, { reportCount: 7 }); // pageSize is 5, so 7 reports = 2 pages
 
     const replies = [];
     const interaction = {
@@ -65,6 +69,7 @@ test('/my-bugs shows only the caller\'s reports, paginated, with a Next button w
     const prevBtn = replies[0].components[0].components.find((c) => c.data.label === '◀ Previous');
     assert.equal(prevBtn.data.disabled, true, 'Previous should be disabled on page 1');
   } finally {
+    roleMock.restore();
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];
   }
@@ -72,8 +77,9 @@ test('/my-bugs shows only the caller\'s reports, paginated, with a Next button w
 
 test('/bugs-by shows the specified user\'s reports, not the caller\'s', async () => {
   const { handler, dbModule, dbModulePath, originalDbCache } = loadWithFakeDb('../src/commands/bugs-by.js');
+  const roleMock = installDiscordRoleMock();
   try {
-    const server = await seed(dbModule, { reportCount: 2 });
+    const server = await seed(dbModule, roleMock, { reportCount: 2 });
 
     const interaction = {
       guildId: 'g1',
@@ -87,6 +93,7 @@ test('/bugs-by shows the specified user\'s reports, not the caller\'s', async ()
     assert.match(interaction._reply.embeds[0].data.title, /Tester1/);
     assert.match(interaction._reply.embeds[0].data.description, /Bug 0/);
   } finally {
+    roleMock.restore();
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];
   }
@@ -96,8 +103,9 @@ test('/bug looks up a single report by its number and links to the public readab
   const { handler, dbModule, dbModulePath, originalDbCache } = loadWithFakeDb('../src/commands/bug.js');
   const realBaseUrl = process.env.WEB_BASE_URL;
   process.env.WEB_BASE_URL = 'https://bugz.example.com';
+  const roleMock = installDiscordRoleMock();
   try {
-    await seed(dbModule, { reportCount: 3 });
+    await seed(dbModule, roleMock, { reportCount: 3 });
 
     const interaction = {
       guildId: 'g1',
@@ -113,6 +121,7 @@ test('/bug looks up a single report by its number and links to the public readab
     assert.equal(embed.url, `https://bugz.example.com/r/${(await dbModule.getBugReportByNumber((await dbModule.getServerByDiscordId('g1')).id, 2)).id}`);
   } finally {
     process.env.WEB_BASE_URL = realBaseUrl;
+    roleMock.restore();
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];
   }
@@ -120,8 +129,9 @@ test('/bug looks up a single report by its number and links to the public readab
 
 test('/bug replies with a plain not-found message for a nonexistent number', async () => {
   const { handler, dbModule, dbModulePath, originalDbCache } = loadWithFakeDb('../src/commands/bug.js');
+  const roleMock = installDiscordRoleMock();
   try {
-    await seed(dbModule, { reportCount: 1 });
+    await seed(dbModule, roleMock, { reportCount: 1 });
     const interaction = {
       guildId: 'g1',
       user: { id: 'tester1' },
@@ -131,6 +141,7 @@ test('/bug replies with a plain not-found message for a nonexistent number', asy
     await handler.execute(interaction);
     assert.match(interaction._reply.content, /No bug #999/);
   } finally {
+    roleMock.restore();
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];
   }
@@ -184,8 +195,9 @@ test('/help lists every other command by scanning the commands directory, never 
 
 test('/list-bugs shows server-wide reports (not filtered to the caller), paginated', async () => {
   const { handler, dbModule, dbModulePath, originalDbCache } = loadWithFakeDb('../src/commands/list-bugs.js');
+  const roleMock = installDiscordRoleMock();
   try {
-    await seed(dbModule, { reportCount: 3 });
+    await seed(dbModule, roleMock, { reportCount: 3 });
 
     const interaction = {
       guildId: 'g1',
@@ -199,15 +211,20 @@ test('/list-bugs shows server-wide reports (not filtered to the caller), paginat
     assert.match(interaction._reply.embeds[0].data.description, /Bug 0/);
     assert.match(interaction._reply.embeds[0].data.description, /Bug 2/);
   } finally {
+    roleMock.restore();
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];
   }
 });
 
-test('/list-bugs rejects someone who is not a member of the tester program', async () => {
+test('/list-bugs rejects someone who holds no Discord role configured with dashboard access', async () => {
   const { handler, dbModule, dbModulePath, originalDbCache } = loadWithFakeDb('../src/commands/list-bugs.js');
+  const roleMock = installDiscordRoleMock();
   try {
-    await seed(dbModule, { reportCount: 1 });
+    await seed(dbModule, roleMock, { reportCount: 1 });
+    // deliberately not registered with the mock at all — matches
+    // someone Discord reports a 404 for (not currently a guild member,
+    // or the request otherwise finds no roles for them).
     const interaction = {
       guildId: 'g1',
       user: { id: 'not-a-member' },
@@ -215,8 +232,9 @@ test('/list-bugs rejects someone who is not a member of the tester program', asy
       reply: async (payload) => { interaction._reply = payload; },
     };
     await handler.execute(interaction);
-    assert.match(interaction._reply.content, /not a member/i);
+    assert.match(interaction._reply.content, /don't have permission/i);
   } finally {
+    roleMock.restore();
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];
   }
@@ -238,8 +256,9 @@ test('clicking Next on a /my-bugs list updates the message in place with page 2'
   if (originalPrismaCache) require.cache[prismaClientPath] = originalPrismaCache;
   else delete require.cache[prismaClientPath];
 
+  const roleMock = installDiscordRoleMock();
   try {
-    await seed(dbModule, { reportCount: 7 });
+    await seed(dbModule, roleMock, { reportCount: 7 });
 
     const calls = [];
     const interaction = {
@@ -258,6 +277,7 @@ test('clicking Next on a /my-bugs list updates the message in place with page 2'
     assert.equal(calls.length, 1);
     assert.match(calls[0].embeds[0].data.footer.text, /Page 2 of 2/);
   } finally {
+    roleMock.restore();
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];
   }

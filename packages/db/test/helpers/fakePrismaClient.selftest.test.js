@@ -12,30 +12,30 @@ test('create + findUnique by id and by a unique field', () => {
 
 test('compound unique key matching for findUnique and upsert', () => {
   const db = createFakePrismaClient();
-  db.membership.create({ data: { userId: 'u1', serverId: 's1', roleId: 'r1' } });
+  db.rolePermission.create({ data: { serverId: 's1', discordRoleId: 'r1', canViewDashboard: true } });
 
-  const found = db.membership.findUnique({ where: { userId_serverId: { userId: 'u1', serverId: 's1' } } });
+  const found = db.rolePermission.findUnique({ where: { serverId_discordRoleId: { serverId: 's1', discordRoleId: 'r1' } } });
   assert.ok(found, 'should find by compound key');
 
-  db.membership.upsert({
-    where: { userId_serverId: { userId: 'u1', serverId: 's1' } },
-    update: { roleId: 'r2' },
-    create: { userId: 'u1', serverId: 's1', roleId: 'r9' },
+  db.rolePermission.upsert({
+    where: { serverId_discordRoleId: { serverId: 's1', discordRoleId: 'r1' } },
+    update: { canManageBugs: true },
+    create: { serverId: 's1', discordRoleId: 'r1', canManageBugs: false },
   });
   assert.equal(
-    db.membership.findUnique({ where: { userId_serverId: { userId: 'u1', serverId: 's1' } } }).roleId,
-    'r2',
+    db.rolePermission.findUnique({ where: { serverId_discordRoleId: { serverId: 's1', discordRoleId: 'r1' } } }).canManageBugs,
+    true,
     'upsert should update the existing row, not create a second one',
   );
 
-  db.membership.upsert({
-    where: { userId_serverId: { userId: 'u2', serverId: 's1' } },
-    update: { roleId: 'should-not-apply' },
-    create: { userId: 'u2', serverId: 's1', roleId: 'r-new' },
+  db.rolePermission.upsert({
+    where: { serverId_discordRoleId: { serverId: 's1', discordRoleId: 'r2' } },
+    update: { canManageBugs: 'should-not-apply' },
+    create: { serverId: 's1', discordRoleId: 'r2', canManageBugs: true },
   });
   assert.equal(
-    db.membership.findUnique({ where: { userId_serverId: { userId: 'u2', serverId: 's1' } } }).roleId,
-    'r-new',
+    db.rolePermission.findUnique({ where: { serverId_discordRoleId: { serverId: 's1', discordRoleId: 'r2' } } }).canManageBugs,
+    true,
     'upsert should create when no existing row matches',
   );
 });
@@ -64,12 +64,12 @@ test('upsert increment syntax accumulates correctly', () => {
 test('relation filtering in where (belongsTo nested condition)', () => {
   const db = createFakePrismaClient();
   const user = db.user.create({ data: { discordId: 'd1' } });
-  db.membership.create({ data: { userId: user.id, serverId: 's1', roleId: 'r1' } });
+  db.bugReport.create({ data: { bugNumber: 1, serverId: 's1', title: 't', reporterId: user.id } });
 
-  const found = db.membership.findFirst({ where: { serverId: 's1', user: { discordId: 'd1' } } });
+  const found = db.bugReport.findFirst({ where: { serverId: 's1', reporter: { discordId: 'd1' } } });
   assert.ok(found, 'should resolve the belongsTo relation and match on its field');
 
-  const notFound = db.membership.findFirst({ where: { serverId: 's1', user: { discordId: 'wrong' } } });
+  const notFound = db.bugReport.findFirst({ where: { serverId: 's1', reporter: { discordId: 'wrong' } } });
   assert.equal(notFound, null);
 });
 
@@ -95,35 +95,33 @@ test('operators: not, lt, contains', () => {
 test('include resolves belongsTo and hasMany, including nested includes', () => {
   const db = createFakePrismaClient();
   const server = db.server.create({ data: { discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' } });
-  const role = db.role.create({ data: { serverId: server.id, name: 'Owner', rank: 100 } });
+  db.rolePermission.create({ data: { serverId: server.id, discordRoleId: 'r1', canManageSettings: true } });
   const link = db.shareLink.create({ data: { serverId: server.id, accessLevel: 'VIEW', createdByDiscordId: 'owner1' } });
   const user = db.user.create({ data: { discordId: 'guest1' } });
   db.guestAccess.create({ data: { shareLinkId: link.id, serverId: server.id, userId: user.id } });
 
-  const membership = db.membership.create({ data: { userId: user.id, serverId: server.id } });
-  db.memberRole.create({ data: { membershipId: membership.id, roleId: role.id } });
-  const withRoles = db.membership.findFirst({ where: { id: membership.id }, include: { roles: { include: { role: true } } } });
-  assert.equal(withRoles.roles.length, 1, 'hasMany include should attach the joined MemberRole rows');
-  assert.equal(withRoles.roles[0].role.name, 'Owner', 'nested belongsTo include (two levels: membership -> memberRole -> role) should resolve');
+  const withRolePerms = db.server.findFirst({ where: { id: server.id }, include: { rolePermissions: true } });
+  assert.equal(withRolePerms.rolePermissions.length, 1, 'hasMany include should attach the joined RolePermission rows');
+  assert.equal(withRolePerms.rolePermissions[0].discordRoleId, 'r1', 'nested belongsTo include should resolve');
 
   const linkWithGuests = db.shareLink.findFirst({ where: { id: link.id }, include: { guestAccess: { include: { user: true } } } });
   assert.equal(linkWithGuests.guestAccess.length, 1);
   assert.equal(linkWithGuests.guestAccess[0].user.discordId, 'guest1', 'nested include should resolve two levels deep');
 });
 
-test('nested create on hasMany relation (server.create with roles: { create: [...] })', () => {
+test('nested create on hasMany relation (server.create with rolePermissions: { create: [...] })', () => {
   const db = createFakePrismaClient();
   const server = db.server.create({
     data: {
       discordServerId: 'g1',
       name: 'Test',
       ownerDiscordId: 'owner1',
-      roles: { create: [{ name: 'Owner', rank: 100 }, { name: 'Tester', rank: 10 }] },
+      rolePermissions: { create: [{ discordRoleId: 'r1' }, { discordRoleId: 'r2' }] },
     },
   });
-  const roles = db.role.findMany({ where: { serverId: server.id } });
-  assert.equal(roles.length, 2);
-  assert.ok(roles.every((r) => r.serverId === server.id), 'nested-created roles should carry the foreign key');
+  const rolePermissions = db.rolePermission.findMany({ where: { serverId: server.id } });
+  assert.equal(rolePermissions.length, 2);
+  assert.ok(rolePermissions.every((r) => r.serverId === server.id), 'nested-created rows should carry the foreign key');
 });
 
 test('orderBy: simple field and nested relation field', () => {
@@ -135,16 +133,16 @@ test('orderBy: simple field and nested relation field', () => {
   const desc = db.bugReport.findMany({ where: { serverId: 's1' }, orderBy: { createdAt: 'desc' } });
   assert.deepEqual(desc.map((r) => r.title), ['b', 'c', 'a']);
 
-  // MemberRole -> Role is still a direct belongsTo in the multi-role
-  // shape, so it's the natural pairing left to test nested orderBy with.
-  const roleLow = db.role.create({ data: { serverId: 's1', name: 'Tester', rank: 10 } });
-  const roleHigh = db.role.create({ data: { serverId: 's1', name: 'Owner', rank: 100 } });
-  const membership = db.membership.create({ data: { userId: 'u1', serverId: 's1' } });
-  db.memberRole.create({ data: { membershipId: membership.id, roleId: roleLow.id } });
-  db.memberRole.create({ data: { membershipId: membership.id, roleId: roleHigh.id } });
+  // guestAccess -> server is a belongsTo relation, so it's a natural
+  // pairing to test nested orderBy against a numeric related field.
+  const serverLow = db.server.create({ data: { discordServerId: 'gLow', name: 'Low', ownerDiscordId: 'o1', nextBugNumber: 1 } });
+  const serverHigh = db.server.create({ data: { discordServerId: 'gHigh', name: 'High', ownerDiscordId: 'o2', nextBugNumber: 99 } });
+  const link = db.shareLink.create({ data: { serverId: serverLow.id, accessLevel: 'VIEW', createdByDiscordId: 'o1' } });
+  db.guestAccess.create({ data: { shareLinkId: link.id, serverId: serverLow.id, userId: 'u1' } });
+  db.guestAccess.create({ data: { shareLinkId: link.id, serverId: serverHigh.id, userId: 'u2' } });
 
-  const byRank = db.memberRole.findMany({ where: { membershipId: membership.id }, orderBy: { role: { rank: 'desc' } } });
-  assert.equal(byRank[0].roleId, roleHigh.id, 'nested relation orderBy should sort by the related record field');
+  const byNextBugNumber = db.guestAccess.findMany({ where: {}, orderBy: { server: { nextBugNumber: 'desc' } } });
+  assert.equal(byNextBugNumber[0].serverId, serverHigh.id, 'nested relation orderBy should sort by the related record field');
 });
 
 test('updateMany, deleteMany, and count respect where filters (not just affect everything)', () => {
@@ -176,31 +174,31 @@ test('groupBy counts per distinct value of the grouping field', () => {
 
 test('create applies schema defaults for omitted fields', () => {
   const db = createFakePrismaClient();
-  const role = db.role.create({ data: { serverId: 's1', name: 'Tester', rank: 10 } });
-  assert.equal(role.canSubmitBugs, true, 'matches @default(true) in schema.prisma');
-  assert.equal(role.canManageBugs, false, 'matches @default(false)');
-  assert.equal(role.canManageSettings, false, 'matches @default(false)');
+  const rolePermission = db.rolePermission.create({ data: { serverId: 's1', discordRoleId: 'r1' } });
+  assert.equal(rolePermission.canSubmitBugs, true, 'matches @default(true) in schema.prisma');
+  assert.equal(rolePermission.canManageBugs, false, 'matches @default(false)');
+  assert.equal(rolePermission.canManageSettings, false, 'matches @default(false)');
 });
 
 test('explicit values in create() override schema defaults', () => {
   const db = createFakePrismaClient();
-  const role = db.role.create({ data: { serverId: 's1', name: 'Owner', rank: 100, canManageSettings: true } });
-  assert.equal(role.canManageSettings, true);
-  assert.equal(role.canSubmitBugs, true, 'default still applies to fields not explicitly given');
+  const rolePermission = db.rolePermission.create({ data: { serverId: 's1', discordRoleId: 'r1', canManageSettings: true } });
+  assert.equal(rolePermission.canManageSettings, true);
+  assert.equal(rolePermission.canSubmitBugs, true, 'default still applies to fields not explicitly given');
 });
 
 test('hasMany relation filter: none — matches records with zero related rows satisfying the nested condition', () => {
   const db = createFakePrismaClient();
   const serverA = db.server.create({ data: { discordServerId: 'gA', name: 'A', ownerDiscordId: 'ownerA' } });
   const serverB = db.server.create({ data: { discordServerId: 'gB', name: 'B', ownerDiscordId: 'ownerB' } });
-  db.membership.create({ data: { userId: 'u1', serverId: serverA.id, roleId: 'r1' } });
+  db.rolePermission.create({ data: { serverId: serverA.id, discordRoleId: 'r1' } });
 
-  // serverA has a membership for u1 -> should NOT match "none such membership"
-  // serverB has no memberships at all -> SHOULD match "none such membership"
-  const matches = db.server.findMany({ where: { memberships: { none: { userId: 'u1' } } } });
+  // serverA has a rolePermission for r1 -> should NOT match "none such row"
+  // serverB has no rolePermissions at all -> SHOULD match "none such row"
+  const matches = db.server.findMany({ where: { rolePermissions: { none: { discordRoleId: 'r1' } } } });
   const ids = matches.map((s) => s.id);
-  assert.ok(!ids.includes(serverA.id), 'server with a matching membership should be excluded');
-  assert.ok(ids.includes(serverB.id), 'server with no matching membership should be included');
+  assert.ok(!ids.includes(serverA.id), 'server with a matching rolePermission should be excluded');
+  assert.ok(ids.includes(serverB.id), 'server with no matching rolePermission should be included');
 });
 
 
@@ -237,10 +235,10 @@ test('{ not: null } correctly excludes fields that were never set (undefined), n
 
 test('create() throws on a compound-unique constraint violation, matching real database behavior', () => {
   const db = createFakePrismaClient();
-  db.role.create({ data: { serverId: 's1', name: 'Dev', rank: 50 } });
-  assert.throws(() => db.role.create({ data: { serverId: 's1', name: 'Dev', rank: 10 } }), /Unique constraint failed/);
-  // Same name, different server — must NOT collide, since the constraint is compound (serverId, name)
-  assert.doesNotThrow(() => db.role.create({ data: { serverId: 's2', name: 'Dev', rank: 50 } }));
+  db.rolePermission.create({ data: { serverId: 's1', discordRoleId: 'r1' } });
+  assert.throws(() => db.rolePermission.create({ data: { serverId: 's1', discordRoleId: 'r1' } }), /Unique constraint failed/);
+  // Same discordRoleId, different server — must NOT collide, since the constraint is compound (serverId, discordRoleId)
+  assert.doesNotThrow(() => db.rolePermission.create({ data: { serverId: 's2', discordRoleId: 'r1' } }));
 });
 
 test('create() throws on a single-field unique constraint violation', () => {
@@ -251,11 +249,11 @@ test('create() throws on a single-field unique constraint violation', () => {
 
 test('update() throws if changing a field would collide with a different existing row, but not when updating other fields on the same row', () => {
   const db = createFakePrismaClient();
-  const roleA = db.role.create({ data: { serverId: 's1', name: 'Dev', rank: 50 } });
-  db.role.create({ data: { serverId: 's1', name: 'Owner', rank: 100 } });
+  const permA = db.rolePermission.create({ data: { serverId: 's1', discordRoleId: 'r1' } });
+  db.rolePermission.create({ data: { serverId: 's1', discordRoleId: 'r2' } });
 
-  assert.doesNotThrow(() => db.role.update({ where: { id: roleA.id }, data: { canManageBugs: true } }), 'updating an unrelated field on the same row must not trip the uniqueness check against itself');
-  assert.throws(() => db.role.update({ where: { id: roleA.id }, data: { name: 'Owner' } }), /Unique constraint failed/);
+  assert.doesNotThrow(() => db.rolePermission.update({ where: { id: permA.id }, data: { canManageBugs: true } }), 'updating an unrelated field on the same row must not trip the uniqueness check against itself');
+  assert.throws(() => db.rolePermission.update({ where: { id: permA.id }, data: { discordRoleId: 'r2' } }), /Unique constraint failed/);
 });
 
 
@@ -301,15 +299,17 @@ test('server defaults isActive to true, matching @default(true)', () => {
   assert.equal(server.isActive, true);
 });
 
-test('belongsTo relation filtering works through different relation names pointing at the same model (membership.server and guestAccess.server)', () => {
+test('belongsTo relation filtering works through a relation name pointing at Server (guestAccess.server)', () => {
   const db = createFakePrismaClient();
   const activeServer = db.server.create({ data: { discordServerId: 'gActive', name: 'Active', ownerDiscordId: 'o1' } });
   const inactiveServer = db.server.create({ data: { discordServerId: 'gInactive', name: 'Inactive', ownerDiscordId: 'o2', isActive: false } });
+  const linkActive = db.shareLink.create({ data: { serverId: activeServer.id, accessLevel: 'VIEW', createdByDiscordId: 'o1' } });
+  const linkInactive = db.shareLink.create({ data: { serverId: inactiveServer.id, accessLevel: 'VIEW', createdByDiscordId: 'o2' } });
 
-  db.membership.create({ data: { userId: 'u1', serverId: activeServer.id } });
-  db.membership.create({ data: { userId: 'u1', serverId: inactiveServer.id } });
+  db.guestAccess.create({ data: { shareLinkId: linkActive.id, serverId: activeServer.id, userId: 'u1' } });
+  db.guestAccess.create({ data: { shareLinkId: linkInactive.id, serverId: inactiveServer.id, userId: 'u1' } });
 
-  const onlyActive = db.membership.findMany({ where: { userId: 'u1', server: { isActive: true } } });
+  const onlyActive = db.guestAccess.findMany({ where: { userId: 'u1', server: { isActive: true } } });
   assert.equal(onlyActive.length, 1);
   assert.equal(onlyActive[0].serverId, activeServer.id);
 });

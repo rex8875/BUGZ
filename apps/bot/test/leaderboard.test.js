@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('../../../packages/db/test/helpers/loadDb');
+const { withDiscordRoles } = require('../../../packages/db/test/helpers/discordRoleMock');
+
+const TESTER_ROLE = 'tester-discord-role';
 
 function loadLeaderboardCommandWithFakeDb() {
   const { db } = loadDbWithFakePrisma();
@@ -19,10 +22,11 @@ async function seedServerWithScores(db) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
   await db.verifyUser({ discordId: 'reporter1', discordUsername: 'TopScorer' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'reporter1', roleId: testerRole.id });
-  await db.createBugReport(server.id, 'reporter1', {
-    title: 'Bug', description: 'd', priority: 'LOW', device: 'PC', evidenceLink: 'https://x.com', f9Link: 'https://x.com',
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
+  await withDiscordRoles({ reporter1: [TESTER_ROLE] }, async () => {
+    await db.createBugReport(server.id, 'reporter1', {
+      title: 'Bug', description: 'd', priority: 'LOW', device: 'PC', evidenceLink: 'https://x.com', f9Link: 'https://x.com',
+    });
   });
   return server;
 }

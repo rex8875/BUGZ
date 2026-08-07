@@ -1,15 +1,20 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadDbWithFakePrisma } = require('./helpers/loadDb');
+const { withDiscordRoles } = require('./helpers/discordRoleMock');
+
+const TESTER_ROLE = 'tester-discord-role';
 
 async function setupServerWithScoredTester(db) {
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
   await db.verifyUser({ discordId: 'tester1', discordUsername: 'Tester1' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1', roleId: testerRole.id });
-  await db.createBugReport(server.id, 'tester1', {
-    title: 'Bug', description: 'd', priority: 'LOW', device: 'PC', evidenceLink: 'https://x.com', f9Link: 'https://x.com',
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
+
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    await db.createBugReport(server.id, 'tester1', {
+      title: 'Bug', description: 'd', priority: 'LOW', device: 'PC', evidenceLink: 'https://x.com', f9Link: 'https://x.com',
+    });
   });
   return server;
 }
@@ -22,7 +27,7 @@ test('leaving the server hides the leaderboard entry, but the score itself is pr
   assert.equal(before.length, 1);
   const pointsBefore = before[0].points;
 
-  await db.removeMembershipOnLeave(server.id, 'tester1');
+  await db.hideLeaverFromLeaderboard(server.id, 'tester1');
 
   const after = await db.getLeaderboard(server.id);
   assert.equal(after.length, 0, 'leaver must not appear on the leaderboard');
@@ -41,7 +46,7 @@ test('the weekly leaderboard also hides leavers and restores them the same way',
   const before = await db.getWeeklyLeaderboard(server.id);
   assert.equal(before.scores.length, 1);
 
-  await db.removeMembershipOnLeave(server.id, 'tester1');
+  await db.hideLeaverFromLeaderboard(server.id, 'tester1');
   const hidden = await db.getWeeklyLeaderboard(server.id);
   assert.equal(hidden.scores.length, 0);
 
@@ -53,7 +58,7 @@ test('the weekly leaderboard also hides leavers and restores them the same way',
 test('rejoining (restoreLeaderboardVisibilityOnRejoin) automatically un-hides — no admin action required', async () => {
   const { db } = loadDbWithFakePrisma();
   const server = await setupServerWithScoredTester(db);
-  await db.removeMembershipOnLeave(server.id, 'tester1');
+  await db.hideLeaverFromLeaderboard(server.id, 'tester1');
   assert.equal((await db.getLeaderboard(server.id)).length, 0);
 
   // Simulates the guildMemberAdd event firing on rejoin — no owner/perms
@@ -75,10 +80,12 @@ test('an owner can manually reset a score to zero, independent of leave/rejoin s
 test('a Tester (no canManageSettings) cannot reset someone\'s score', async () => {
   const { db } = loadDbWithFakePrisma();
   const server = await setupServerWithScoredTester(db);
-  await assert.rejects(
-    () => db.resetLeaderboardScore({ serverId: server.id, actingDiscordId: 'tester1', targetDiscordId: 'tester1' }),
-    /not permitted/i,
-  );
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    await assert.rejects(
+      () => db.resetLeaderboardScore({ serverId: server.id, actingDiscordId: 'tester1', targetDiscordId: 'tester1' }),
+      /not permitted/i,
+    );
+  });
 });
 
 test('leaving with zero points (never reported anything) is a safe no-op, not an error', async () => {
@@ -86,8 +93,7 @@ test('leaving with zero points (never reported anything) is a safe no-op, not an
   const server = await db.createServerOnJoin({ discordServerId: 'g1', name: 'Test', ownerDiscordId: 'owner1' });
   await db.verifyUser({ discordId: 'owner1', discordUsername: 'Owner' });
   await db.verifyUser({ discordId: 'lurker1', discordUsername: 'Lurker' });
-  const testerRole = (await db.listRoles(server.id)).find((r) => r.name === 'Tester');
-  await db.grantRole({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'lurker1', roleId: testerRole.id });
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
 
-  await assert.doesNotReject(() => db.removeMembershipOnLeave(server.id, 'lurker1'));
+  await assert.doesNotReject(() => db.hideLeaverFromLeaderboard(server.id, 'lurker1'));
 });
