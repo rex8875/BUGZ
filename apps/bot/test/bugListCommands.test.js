@@ -282,3 +282,38 @@ test('clicking Next on a /my-bugs list updates the message in place with page 2'
     else delete require.cache[dbModulePath];
   }
 });
+
+test('end-to-end: /list-bugs works while the role is held, then the exact same person is blocked the moment the role is taken away in Discord — no separate bot-side action needed', async () => {
+  const { handler, dbModule, dbModulePath, originalDbCache } = loadWithFakeDb('../src/commands/list-bugs.js');
+  const roleMock = installDiscordRoleMock();
+  try {
+    await seed(dbModule, roleMock, { reportCount: 1 });
+
+    const interactionWithRole = {
+      guildId: 'g1',
+      user: { id: 'tester1' },
+      options: { getString: () => null },
+      reply: async (payload) => { interactionWithRole._reply = payload; },
+    };
+    await handler.execute(interactionWithRole);
+    assert.ok(interactionWithRole._reply.embeds, '/list-bugs succeeds while the role is held');
+
+    // Simulates the role being removed in Discord itself -- nothing
+    // bot-side is called, we just flip what the live role lookup
+    // reports for this person, exactly as a real removal would.
+    roleMock.setMemberRoles('tester1', []);
+
+    const interactionWithoutRole = {
+      guildId: 'g1',
+      user: { id: 'tester1' },
+      options: { getString: () => null },
+      reply: async (payload) => { interactionWithoutRole._reply = payload; },
+    };
+    await handler.execute(interactionWithoutRole);
+    assert.match(interactionWithoutRole._reply.content, /don't have permission/i, '/list-bugs is blocked immediately after the role is gone, same process, no restart or cache clear involved');
+  } finally {
+    roleMock.restore();
+    if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
+    else delete require.cache[dbModulePath];
+  }
+});
