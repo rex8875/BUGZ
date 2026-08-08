@@ -93,7 +93,7 @@ test('board.html: search with a malformed date token (on:notadate) does not cras
   assert.match(decodeURIComponent(call).replace(/\+/g,' '), /on=notadate/, 'the raw token is passed through — validation/rejection happens server-side, not silently swallowed client-side');
 });
 
-test('board.html: rapid double-click on the same report row does not create two detail panels or duplicate API calls', async () => {
+test('board.html: repeatedly clicking the same report row does not create two detail panels or duplicate API calls', async () => {
   let reportFetchCount = 0;
   const dom = await renderPage({
     htmlFile: 'board.html', scripts: ['board.js'],
@@ -104,11 +104,37 @@ test('board.html: rapid double-click on the same report row does not create two 
     },
   });
   const doc = dom.window.document;
-  const row = doc.querySelector('.report-row');
-  row.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
-  row.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
-  row.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
-  await new Promise((r) => setTimeout(r, 20));
-  const panels = doc.querySelectorAll('#detail-area .detail-panel');
-  assert.equal(panels.length, 1, 'triple-clicking the same row should never produce more than one detail panel');
+  // Three separate clicks on the same row: 1st selects (quick view), 2nd
+  // expands (full view), 3rd is a no-op while already expanded (matching
+  // "use the × to close it" rather than toggling on every click).
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  const panels = doc.querySelectorAll('#report-list .detail-panel');
+  assert.equal(panels.length, 1, 'repeated clicks on the same row should never produce more than one detail panel');
+});
+
+test('board.html: the detail panel\'s close button collapses it back to quick view without a page reload', async () => {
+  const dom = await renderPage({
+    htmlFile: 'board.html', scripts: ['board.js'],
+    fetchImpl: async (url) => {
+      if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
+      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+    },
+  });
+  const doc = dom.window.document;
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(doc.querySelector('#report-list .detail-panel'), 'sanity check: detail panel should be open');
+
+  doc.querySelector('[data-close-detail]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(doc.querySelector('#report-list .detail-panel'), null, 'the close button must remove the detail panel entirely, with no page reload required');
+  assert.ok(doc.querySelector('.report-row.selected'), 'the row itself should remain selected (quick view), only the full view collapses');
 });

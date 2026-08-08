@@ -13,6 +13,7 @@ const state = {
   permissions: null,
   retestChannelId: null,
   testerPingRoleId: null,
+  backgroundStyle: null,
   reports: [],
   selectedId: null,
   expandedId: null,
@@ -73,6 +74,7 @@ async function load() {
       avatarEl.replaceWith(fallback);
     }
     if (me.backgroundStyle) {
+      state.backgroundStyle = me.backgroundStyle;
       if (me.backgroundStyle.startsWith('linear-gradient')) {
         document.body.style.backgroundImage = `${me.backgroundStyle}, ${getComputedStyle(document.body).backgroundImage}`;
       } else {
@@ -82,6 +84,9 @@ async function load() {
     document.getElementById('leaderboard-link').href = `/dashboard/${serverId}/leaderboard`;
     if (state.permissions.canManageSettings || state.permissions.canShareDashboard) {
       document.getElementById('settings-btn').style.display = 'inline-block';
+    }
+    if (state.permissions.canManageSettings) {
+      document.getElementById('customize-btn').style.display = 'inline-block';
     }
     if (state.permissions.canManageRoles) {
       const rolesLink = document.getElementById('roles-link');
@@ -111,8 +116,7 @@ async function openDeepLinkedReportIfAny() {
     state.selectedId = report.id;
     state.expandedId = report.id;
     renderList();
-    renderDetail();
-    document.getElementById('detail-area').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.querySelector(`.detail-panel[data-report-id="${report.id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (err) {
     showError(`Couldn't open the linked report: ${err.message}`);
   }
@@ -167,22 +171,23 @@ async function loadReports() {
   if (state.filter.byUsername) params.set('by', state.filter.byUsername);
   if (state.filter.device) params.set('device', state.filter.device);
   state.reports = await api(`/api/servers/${serverId}/reports?${params}`);
+  if (state.expandedId && !state.reports.some((r) => r.id === state.expandedId)) state.expandedId = null;
   renderFilters();
   renderList();
-  renderDetail();
 }
 
 function renderFilters() {
+  const statusDot = (key) => (key ? `<span class="pill-dot pill-dot-status-${key}"></span>` : `<span class="pill-dot pill-dot-all"></span>`);
   const tabs = [{ key: null, label: 'Active' }, ...STATUSES.map((s) => ({ key: s, label: LABELS[s] }))];
   document.getElementById('filters').innerHTML =
     `<div class="filter-group-label">Status</div><div class="filters">` +
     tabs
       .map(
         (t) =>
-          `<div class="filter-pill ${state.filter.status === t.key && !state.filter.archived ? 'active' : ''}" data-status="${t.key || ''}">${t.label}</div>`,
+          `<div class="filter-pill ${state.filter.status === t.key && !state.filter.archived ? 'active' : ''}" data-status="${t.key || ''}">${statusDot(t.key)}${t.label}</div>`,
       )
       .join('') +
-    `<div class="filter-pill ${state.filter.archived ? 'active' : ''}" data-archived="1">Archived</div></div>`;
+    `<div class="filter-pill ${state.filter.archived ? 'active' : ''}" data-archived="1"><span class="pill-dot pill-dot-archived"></span>Archived</div></div>`;
 
   document.getElementById('filters').querySelectorAll('[data-status]').forEach((el) => {
     el.addEventListener('click', () => {
@@ -197,11 +202,12 @@ function renderFilters() {
     loadReports();
   });
 
+  const priorityDot = (key) => `<span class="pill-dot ${key ? `pill-dot-priority-${key}` : 'pill-dot-all'}"></span>`;
   const priorityTabs = [{ key: null, label: 'All priorities' }, ...PRIORITIES.map((p) => ({ key: p, label: LABELS[p] }))];
   document.getElementById('priority-filters').innerHTML =
     `<div class="filter-group-label">Priority</div><div class="filters">` +
     priorityTabs
-      .map((t) => `<div class="filter-pill ${state.filter.priority === t.key ? 'active' : ''}" data-priority="${t.key || ''}">${t.label}</div>`)
+      .map((t) => `<div class="filter-pill ${state.filter.priority === t.key ? 'active' : ''}" data-priority="${t.key || ''}">${priorityDot(t.key)}${t.label}</div>`)
       .join('') +
     `</div>`;
 
@@ -248,28 +254,32 @@ function renderList() {
   list.innerHTML = state.reports
     .map((r, i) => {
       const selected = r.id === state.selectedId;
+      const expanded = r.id === state.expandedId;
       return `
-        <div class="report-row animate__animated animate__fadeInUp animate__faster ${selected ? 'selected' : ''}" data-report-id="${r.id}" style="animation-delay:${Math.min(i, 12) * 35}ms">
+        <div class="report-row animate__animated animate__fadeInUp animate__faster ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''}" data-report-id="${r.id}" style="animation-delay:${Math.min(i, 12) * 35}ms">
           <div class="title">${escapeHtml(r.title)}</div>
           ${priorityStatusTagsHtml(r)}
           ${selected ? quickActionsHtml(r) : ''}
-        </div>`;
+        </div>
+        ${expanded ? detailPanelHtml(r) : ''}`;
     })
     .join('');
 
   list.querySelectorAll('.report-row').forEach((row) => {
     const id = row.dataset.reportId;
     row.addEventListener('click', (e) => {
-      if (e.target.closest('select, button')) return;
-      state.selectedId = id;
+      if (e.target.closest('select, button, a, input')) return;
+      if (state.expandedId === id) return; // already fully open — use the × to close it
+      if (state.selectedId === id) {
+        // second click on the already-quick-viewed row -> open the full view
+        state.expandedId = id;
+      } else {
+        // first click on this row -> quick view only, collapsing any other
+        // report's full view that might currently be open
+        state.selectedId = id;
+        state.expandedId = null;
+      }
       renderList();
-    });
-    row.addEventListener('dblclick', (e) => {
-      if (e.target.closest('select, button')) return;
-      state.selectedId = id;
-      state.expandedId = id;
-      renderList();
-      renderDetail();
     });
   });
 
@@ -282,6 +292,9 @@ function renderList() {
   list.querySelectorAll('[data-action]').forEach((btn) => {
     btn.addEventListener('click', (e) => runAction(e.target.closest('[data-report-id]').dataset.reportId, btn.dataset.action));
   });
+
+  bindDetailPanelEvents();
+  if (window.lucide) window.lucide.createIcons();
 }
 
 function isSafeLinkUrl(value) {
@@ -307,21 +320,15 @@ function evidenceLinkHtml(fileUrl, link) {
   return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener" class="raw-link" title="${escapeHtml(url)}">${escapeHtml(url)}</a>`;
 }
 
-function renderDetail() {
-  const area = document.getElementById('detail-area');
-  const report = state.reports.find((r) => r.id === state.expandedId);
-  if (!report) {
-    area.innerHTML = '';
-    return;
-  }
-
-  area.innerHTML = `
-    <div class="detail-panel animate__animated animate__fadeInDown animate__faster">
-      <h2>${escapeHtml(report.title)} ${state.permissions.canEditReports ? '<button data-edit-title>Edit title</button>' : ''}</h2>
-      <div class="detail-meta">reported by ${escapeHtml(report.reporter?.discordUsername || 'unknown')} · ${escapeHtml(report.device || 'unspecified device')} · ${new Date(report.createdAt).toLocaleDateString()}</div>
+function detailPanelHtml(report) {
+  return `
+    <div class="detail-panel animate__animated animate__fadeInDown animate__faster" data-report-id="${report.id}">
+      <button class="detail-close" data-close-detail title="Close" aria-label="Close detail view"><i data-lucide="x"></i></button>
+      <h2>${escapeHtml(report.title)} ${state.permissions.canEditReports ? '<button data-edit-title><i data-lucide="pencil"></i> Edit title</button>' : ''}</h2>
+      <div class="detail-meta"><i data-lucide="user"></i> reported by ${escapeHtml(report.reporter?.discordUsername || 'unknown')} · ${escapeHtml(report.device || 'unspecified device')} · ${new Date(report.createdAt).toLocaleDateString()}</div>
       <div class="detail-tags">${priorityStatusTagsHtml(report)}</div>
 
-      <div class="detail-row"><div class="label">Description</div><div>${escapeHtml(report.description)} ${state.permissions.canEditReports ? '<button data-edit-description>Edit</button>' : ''}</div></div>
+      <div class="detail-row"><div class="label">Description</div><div>${escapeHtml(report.description)} ${state.permissions.canEditReports ? '<button data-edit-description><i data-lucide="pencil"></i> Edit</button>' : ''}</div></div>
       ${report.stepsToReproduce ? `<div class="detail-row"><div class="label">Steps</div><div>${escapeHtml(report.stepsToReproduce)}</div></div>` : ''}
       <div class="detail-row"><div class="label">Evidence</div><div>${evidenceLinkHtml(report.evidenceFileUrl, report.evidenceLink)}</div></div>
       <div class="detail-row"><div class="label">F9</div><div>${evidenceLinkHtml(report.f9FileUrl, report.f9Link)}</div></div>
@@ -330,13 +337,25 @@ function renderDetail() {
       ${quickActionsHtml(report)}
       ${state.permissions.canPingTesters ? `<div class="posts-to">Posts to channel ${state.retestChannelId ? escapeHtml(state.retestChannelId) : '(not set — see Settings)'}</div>` : ''}
       ${state.permissions.canArchive ? `<div class="hint">Archive enables once status is Fixed, Not a bug, Duplicate, or Won't fix</div>` : ''}
-      ${state.permissions.canDeleteReports ? `<div style="margin-top:12px;"><button data-delete-report>Delete permanently</button></div>` : ''}
+      ${state.permissions.canDeleteReports ? `<div style="margin-top:12px;"><button data-delete-report><i data-lucide="trash-2"></i> Delete permanently</button></div>` : ''}
     </div>`;
+}
 
-  const panel = area.querySelector('.detail-panel');
+function bindDetailPanelEvents() {
+  const panel = document.querySelector('#report-list .detail-panel');
+  if (!panel) return;
+  const reportId = panel.dataset.reportId;
+  const report = state.reports.find((r) => r.id === reportId);
+  if (!report) return;
+
   panel.querySelectorAll('.priority-select').forEach((sel) => sel.addEventListener('change', () => updateReport(report.id, { priority: sel.value })));
   panel.querySelectorAll('.status-select').forEach((sel) => sel.addEventListener('change', () => updateReport(report.id, { status: sel.value })));
   panel.querySelectorAll('[data-action]').forEach((btn) => btn.addEventListener('click', () => runAction(report.id, btn.dataset.action)));
+
+  panel.querySelector('[data-close-detail]').addEventListener('click', () => {
+    state.expandedId = null;
+    renderList();
+  });
 
   const editTitleBtn = panel.querySelector('[data-edit-title]');
   if (editTitleBtn) {
@@ -363,7 +382,6 @@ function renderDetail() {
         state.reports = state.reports.filter((r) => r.id !== report.id);
         state.expandedId = null;
         renderList();
-        renderDetail();
         loadSummary();
       } catch (err) {
         showError(err.message);
@@ -377,7 +395,6 @@ async function updateReport(id, data) {
     const updated = await api(`/api/servers/${serverId}/reports/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
     state.reports = state.reports.map((r) => (r.id === id ? updated : r));
     renderList();
-    renderDetail();
     if (data.status) loadSummary();
   } catch (err) {
     showError(err.message);
@@ -389,7 +406,6 @@ async function runAction(id, action) {
     const updated = await api(`/api/servers/${serverId}/reports/${id}/${action}`, { method: 'POST' });
     state.reports = state.reports.map((r) => (r.id === id ? updated : r));
     renderList();
-    renderDetail();
     if (action === 'archive') loadSummary();
   } catch (err) {
     showError(err.message);
@@ -398,6 +414,59 @@ async function runAction(id, action) {
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// ---- Customize (per-server background — same picker used on the servers list page) ----
+
+document.getElementById('customize-btn').addEventListener('click', () => {
+  const panel = document.getElementById('customize-panel');
+  const isOpen = panel.style.display !== 'none';
+  panel.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) renderCustomizePanel();
+});
+
+function renderCustomizePanel() {
+  const panel = document.getElementById('customize-panel');
+  panel.innerHTML = `
+    <div class="appearance-panel animate__animated animate__fadeInDown animate__faster">
+      <h3><i data-lucide="palette"></i> Background</h3>
+      <div id="picker-mount"></div>
+      <div class="quick-actions" style="border:none;margin-top:14px;padding-top:0;">
+        <button class="primary" id="save-appearance-btn"><i data-lucide="check"></i> Save background</button>
+        <button id="clear-appearance-btn"><i data-lucide="rotate-ccw"></i> Reset to default</button>
+        <span class="hint" id="appearance-error"></span>
+      </div>
+    </div>`;
+  if (window.lucide) window.lucide.createIcons();
+
+  const picker = window.FieldLogColorPicker.createAppearancePicker({
+    container: document.getElementById('picker-mount'),
+    initialValue: state.backgroundStyle,
+  });
+
+  document.getElementById('save-appearance-btn').addEventListener('click', async (e) => {
+    try {
+      const updated = await api(`/api/servers/${serverId}/appearance`, {
+        method: 'PATCH',
+        body: JSON.stringify({ backgroundStyle: picker.getValue() }),
+      });
+      state.backgroundStyle = updated.backgroundStyle;
+      e.target.classList.add('save-success');
+      e.target.textContent = 'Saved ✓';
+      setTimeout(() => window.location.reload(), 420); // simplest correct way to re-apply the new body background everywhere it's used
+    } catch (err) {
+      document.getElementById('appearance-error').textContent = err.message;
+    }
+  });
+
+  document.getElementById('clear-appearance-btn').addEventListener('click', async () => {
+    try {
+      await api(`/api/servers/${serverId}/appearance`, { method: 'PATCH', body: JSON.stringify({ backgroundStyle: null }) });
+      window.location.reload();
+    } catch (err) {
+      document.getElementById('appearance-error').textContent = err.message;
+    }
+  });
 }
 
 // ---- Settings panel (retest channel + share links) ----
@@ -421,12 +490,12 @@ async function renderSettings() {
       <div>
         <label>Retest channel ID</label>
         <input type="text" id="retest-channel-input" value="${escapeHtml(state.retestChannelId || '')}" placeholder="Discord channel ID" />
-        <button id="save-channel-btn">Save</button>
+        <button id="save-channel-btn"><i data-lucide="check"></i> Save</button>
       </div>
       <div>
         <label>Tester role ID to ping</label>
         <input type="text" id="tester-role-input" value="${escapeHtml(state.testerPingRoleId || '')}" placeholder="Discord role ID" />
-        <button id="save-tester-role-btn">Save</button>
+        <button id="save-tester-role-btn"><i data-lucide="check"></i> Save</button>
       </div>
     </div>
     <div class="hint">Easier to set the role with <code>/set-tester-role</code> in Discord directly — this is a fallback for when you already have the ID.</div>`
@@ -439,11 +508,13 @@ async function renderSettings() {
     <div class="field-group">
       <select id="new-link-level"><option value="VIEW">View access</option><option value="DEV">Dev access</option></select>
       <input type="text" id="new-link-label" placeholder="Label (optional)" />
-      <button id="create-link-btn" class="primary">Create link</button>
+      <button id="create-link-btn" class="primary"><i data-lucide="link"></i> Create link</button>
     </div>
     <div id="link-list"></div>`
         : ''
     }`;
+
+  if (window.lucide) window.lucide.createIcons();
 
   if (canSettings) {
     document.getElementById('save-channel-btn').addEventListener('click', async () => {
@@ -501,11 +572,12 @@ function renderLinkList(links) {
           ${escapeHtml(l.label || '(no label)')} —
           ${l.revokedAt ? '<span class="hint">revoked</span>' : `<a href="${window.location.origin}/share/${l.id}">${window.location.origin}/share/${l.id}</a>`}
           · used by ${l.guestAccess.length} ${l.guestAccess.length === 1 ? 'person' : 'people'}
-          ${!l.revokedAt ? `<button data-revoke="${l.id}">Revoke</button>` : ''}
+          ${!l.revokedAt ? `<button data-revoke="${l.id}"><i data-lucide="ban"></i> Revoke</button>` : ''}
         </div>
       </div>`,
     )
     .join('');
+  if (window.lucide) window.lucide.createIcons();
 
   document.querySelectorAll('[data-revoke]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -550,5 +622,6 @@ searchInputEl.addEventListener('keydown', (e) => {
     runSearch(searchInputEl.value);
   }
 });
+if (window.lucide) window.lucide.createIcons(); // static topbar icons present before load() runs
 
 load();

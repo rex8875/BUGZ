@@ -135,7 +135,7 @@ test('board.html opens directly to a specific report when linked via ?report=<id
   });
   const doc = dom.window.document;
 
-  const detailPanel = doc.querySelector('#detail-area .detail-panel');
+  const detailPanel = doc.querySelector('#report-list .detail-panel');
   assert.ok(detailPanel, 'the linked report should open directly in the detail panel on load');
   assert.match(detailPanel.textContent, /Deep linked bug/);
 });
@@ -224,12 +224,16 @@ test('board.html never renders a javascript: (or other non-http) evidence link a
   });
   const doc = dom.window.document;
   const row = doc.querySelector('.report-row');
-  row.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
+  // Real two-step flow: first click opens quick view, a second separate
+  // click on the same (now-selected) row opens the full detail panel.
+  row.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 10));
 
   const link = doc.querySelector('a.raw-link');
   assert.equal(link, null, 'a javascript: URL must never render as a clickable <a> element');
-  assert.match(doc.getElementById('detail-area').textContent, /javascript:alert/, 'the raw text should still be visible (just not clickable), so nothing is silently hidden');
+  assert.match(doc.querySelector('#report-list .detail-panel').textContent, /javascript:alert/, 'the raw text should still be visible (just not clickable), so nothing is silently hidden');
 });
 
 test('board.html shows the raw evidence/F9 URL as visible text, not a generic "View" link', async () => {
@@ -250,9 +254,10 @@ test('board.html shows the raw evidence/F9 URL as visible text, not a generic "V
   });
   const doc = dom.window.document;
 
-  // Double-click to expand into the detail panel, same as a real user would.
-  const row = doc.querySelector('.report-row');
-  row.dispatchEvent(new dom.window.MouseEvent('dblclick', { bubbles: true }));
+  // Two separate clicks to expand into the detail panel, same as a real user would.
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((resolve) => setTimeout(resolve, 10));
 
   const link = doc.querySelector('a.raw-link');
