@@ -9,13 +9,14 @@
   <div class="container">
     <div class="topbar">
       <div>
-        <h1>Your Servers</h1>
+        <h1><i data-lucide="layout-grid"></i> Your Servers</h1>
         <div class="hint" style="margin-top:2px;">Pick a server to open its bug board.</div>
       </div>
-      <form action="/auth/logout" method="post"><button>Log out</button></form>
+      <form action="/auth/logout" method="post"><button><i data-lucide="log-out"></i> Log out</button></form>
     </div>
     <div id="list"><span class="loading-pulse">Loading…</span></div>
   </div>
+  <script src="https://unpkg.com/lucide@1.30.0"></script>
   <script src="/colorPicker.js"></script>
   <script src="/servers.js"></script>
 </body>

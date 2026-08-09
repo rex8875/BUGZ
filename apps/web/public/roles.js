@@ -122,6 +122,8 @@ function renderRoleList() {
     })
     .join('');
 
+  if (window.lucide) window.lucide.createIcons();
+
   list.querySelectorAll('[data-toggle-role]').forEach((el) => {
     el.addEventListener('click', () => {
       expandedRoleId = expandedRoleId === el.dataset.toggleRole ? null : el.dataset.toggleRole;
@@ -136,8 +138,8 @@ function roleBodyHtml(role, current) {
   return `
     <div class="perm-grid">${permGridHtml(`role-${role.id}`, current)}</div>
     <div class="cmd-row-actions">
-      <button class="primary" data-save-role="${role.id}">Save</button>
-      <button data-clear-role="${role.id}">Reset to default (no access)</button>
+      <button class="primary" data-save-role="${role.id}"><i data-lucide="check"></i> Save</button>
+      <button data-clear-role="${role.id}"><i data-lucide="rotate-ccw"></i> Reset to default (no access)</button>
       <span class="hint" id="role-perms-error-${role.id}"></span>
     </div>`;
 }
@@ -201,20 +203,26 @@ document.getElementById('ban-member-btn').addEventListener('click', async () => 
 function renderBanned(banned) {
   const list = document.getElementById('banned-list');
   if (banned.length === 0) {
-    list.innerHTML = '<div class="hint">No one is banned.</div>';
+    list.innerHTML = '<div class="hint empty-state"><i data-lucide="shield-check"></i> No one is banned.</div>';
+    if (window.lucide) window.lucide.createIcons();
     return;
   }
 
   list.innerHTML = banned
     .map(
-      (b) => `
-      <div class="banned-row" data-discord-id="${b.discordId}">
-        <div style="flex:1;">${escapeHtml(b.discordId)} ${b.reason ? `— ${escapeHtml(b.reason)}` : ''}</div>
+      (b, i) => `
+      <div class="banned-row animate__animated animate__fadeInUp animate__faster" data-discord-id="${b.discordId}" style="animation-delay:${Math.min(i, 12) * 30}ms">
+        <div class="banned-row-icon"><i data-lucide="user-x"></i></div>
+        <div class="banned-row-main">
+          <div class="banned-row-id">${escapeHtml(b.discordId)}</div>
+          ${b.reason ? `<div class="banned-row-reason">${escapeHtml(b.reason)}</div>` : ''}
+        </div>
         <div class="hint">${new Date(b.bannedAt).toLocaleDateString()}</div>
-        <button data-unban>Unban</button>
+        <button data-unban><i data-lucide="undo-2"></i> Unban</button>
       </div>`,
     )
     .join('');
+  if (window.lucide) window.lucide.createIcons();
 
   list.querySelectorAll('[data-unban]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -232,12 +240,36 @@ function renderBanned(banned) {
 function renderAuditLog(entries) {
   const list = document.getElementById('audit-list');
   if (entries.length === 0) {
-    list.innerHTML = '<div class="hint">No actions logged yet.</div>';
+    list.innerHTML = '<div class="hint empty-state"><i data-lucide="scroll-text"></i> No actions logged yet.</div>';
+    if (window.lucide) window.lucide.createIcons();
     return;
   }
 
+  const ACTION_ICONS = {
+    MEMBER_BANNED: 'user-x',
+    MEMBER_UNBANNED: 'user-check',
+    MEMBER_LEFT_DISCORD: 'log-out',
+    OWNERSHIP_TRANSFERRED: 'crown',
+    POINTS_ADJUSTED: 'trending-up',
+    ROLE_PERMISSIONS_UPDATED: 'shield',
+    ROLE_PERMISSIONS_REMOVED: 'shield-off',
+    SHARE_LINK_CREATED: 'link',
+    SHARE_LINK_REVOKED: 'link-2-off',
+  };
+  const ACTION_LABELS = {
+    MEMBER_BANNED: 'banned a member',
+    MEMBER_UNBANNED: 'unbanned a member',
+    MEMBER_LEFT_DISCORD: 'left the Discord server',
+    OWNERSHIP_TRANSFERRED: 'transferred ownership',
+    POINTS_ADJUSTED: 'adjusted leaderboard points',
+    ROLE_PERMISSIONS_UPDATED: 'updated role permissions',
+    ROLE_PERMISSIONS_REMOVED: 'cleared role permissions',
+    SHARE_LINK_CREATED: 'created a share link',
+    SHARE_LINK_REVOKED: 'revoked a share link',
+  };
+
   list.innerHTML = entries
-    .map((e) => {
+    .map((e, i) => {
       let details = '';
       try {
         details = e.details ? ` — ${JSON.stringify(JSON.parse(e.details))}` : '';
@@ -245,12 +277,16 @@ function renderAuditLog(entries) {
         details = '';
       }
       return `
-        <div class="audit-row">
-          <div style="flex:1;">${escapeHtml(e.actorDiscordId)} — ${escapeHtml(e.action)}${escapeHtml(details)}</div>
+        <div class="audit-row animate__animated animate__fadeInUp animate__faster" style="animation-delay:${Math.min(i, 12) * 25}ms">
+          <div class="audit-row-icon"><i data-lucide="${ACTION_ICONS[e.action] || 'activity'}"></i></div>
+          <div class="audit-row-main">
+            <span class="audit-row-actor">${escapeHtml(e.actorDiscordId)}</span> ${escapeHtml(ACTION_LABELS[e.action] || e.action)}${escapeHtml(details)}
+          </div>
           <div class="hint">${new Date(e.createdAt).toLocaleString()}</div>
         </div>`;
     })
     .join('');
+  if (window.lucide) window.lucide.createIcons();
 }
 
 load();

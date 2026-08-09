@@ -90,12 +90,49 @@ test('leaderboard.html: XSS payloads in username never execute', async () => {
       scripts: ['leaderboard.js'],
       fetchImpl: async (url) => {
         if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: {} }) };
-        return { ok: true, status: 200, json: async () => ({ scores: [{ user: { discordId: 'u1', discordUsername: payload }, points: 5 }] }) };
+        // The default tab is all-time, which returns a bare array —
+        // NOT the {scores:[...]} shape the weekly endpoint uses. Using
+        // the wrong shape here previously made render() throw
+        // internally (caught by load()'s try/catch), leaving #board
+        // empty — which made this test pass trivially without ever
+        // actually exercising the XSS-escaping code path at all.
+        return { ok: true, status: 200, json: async () => [{ user: { discordId: 'u1', discordUsername: payload }, points: 5 }] };
       },
     });
     const doc = dom.window.document;
+    assert.match(doc.getElementById('board').innerHTML, /pt/, `sanity check: the leaderboard should have actually rendered something for payload ${payload}, not silently failed`);
     const dangerousEls = doc.querySelectorAll('#board script, #board img[onerror], #board svg[onload]');
     assert.equal(dangerousEls.length, 0, `leaderboard username payload should never execute: ${payload}`);
   }
   console.log('PASS — leaderboard.js survives XSS payloads in usernames');
+});
+
+test('roles.html: renders banned-member/audit-log rows without crashing, and escapes XSS in a ban reason and audit log entries', async () => {
+  const dom = await renderPage({
+    htmlFile: 'roles.html',
+    scripts: ['roles.js'],
+    fetchImpl: async (url) => {
+      if (String(url).includes('/role-permissions')) return { ok: true, status: 200, json: async () => ({ roles: [], configured: [] }) };
+      if (String(url).includes('/banned')) {
+        return {
+          ok: true, status: 200,
+          json: async () => [{ discordId: '111', reason: '<img src=x onerror=alert(1)>', bannedAt: new Date().toISOString() }],
+        };
+      }
+      if (String(url).includes('/audit-log')) {
+        return {
+          ok: true, status: 200,
+          json: async () => [{ actorDiscordId: '<script>alert(1)</script>', action: 'MEMBER_BANNED', details: null, createdAt: new Date().toISOString() }],
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+  });
+  const doc = dom.window.document;
+  const bannedList = doc.getElementById('banned-list');
+  const auditList = doc.getElementById('audit-list');
+  assert.match(bannedList.textContent, /111/, 'sanity check: the banned row actually rendered');
+  assert.match(auditList.textContent, /banned a member/, 'sanity check: the audit row actually rendered with its human-readable label');
+  const dangerousEls = doc.querySelectorAll('#banned-list script, #banned-list img[onerror], #audit-list script, #audit-list img[onerror]');
+  assert.equal(dangerousEls.length, 0, 'ban reason and actor id XSS payloads must never execute');
 });

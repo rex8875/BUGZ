@@ -8,14 +8,14 @@
 <body>
   <div class="container">
     <div class="topbar">
-      <h1>Roles & Permissions</h1>
-      <a id="back-link" href=""><button>Back to dashboard</button></a>
+      <h1><i data-lucide="shield"></i> Roles & Permissions</h1>
+      <a id="back-link" href=""><button><i data-lucide="arrow-left"></i> Back to dashboard</button></a>
     </div>
 
     <div id="error" class="error-banner" style="display:none;"></div>
 
     <section>
-      <h2>Roles</h2>
+      <h2><i data-lucide="users"></i> Roles</h2>
       <div class="cmd-perms-intro">
         Bot permissions are linked directly to this server's own Discord roles — there's no separate role to create here. Pick one of your existing Discord roles below and choose what it can do. Anyone holding that role gets these permissions immediately, checked live against Discord; remove the role from them in Discord and access is gone just as fast.
       </div>
@@ -25,7 +25,7 @@
     </section>
 
     <section style="margin-top:28px;">
-      <h2>Command Permissions</h2>
+      <h2><i data-lucide="sliders-horizontal"></i> Command Permissions</h2>
       <div class="cmd-perms-intro">
         By default, every command follows this server's normal role permissions above. You only need to touch anything here if you want a <em>specific command</em> restricted to <em>specific Discord roles</em> — like Dyno's per-command role restrictions — regardless of someone's normal permissions.
       </div>
@@ -35,7 +35,7 @@
     </section>
 
     <section style="margin-top:28px;">
-      <h2>Ban</h2>
+      <h2><i data-lucide="ban"></i> Ban</h2>
       <div class="hint" style="margin-bottom:10px;">
         Real membership lives in Discord itself — check your server's own member list there for who's actually in the server. Use this to block someone from the bug tracker specifically, regardless of what Discord role they hold.
       </div>
@@ -44,16 +44,17 @@
           <div><label>Discord ID</label><input type="text" id="ban-member-id" placeholder="Numeric Discord ID" /></div>
           <div><label>Reason (optional)</label><input type="text" id="ban-member-reason" placeholder="Why" /></div>
         </div>
-        <button id="ban-member-btn" class="primary" style="margin-top:8px;">Ban</button>
+        <button id="ban-member-btn" class="primary" style="margin-top:8px;"><i data-lucide="ban"></i> Ban</button>
       </div>
       <div id="banned-list"></div>
     </section>
 
     <section style="margin-top:28px;">
-      <h2>Audit log</h2>
+      <h2><i data-lucide="scroll-text"></i> Audit log</h2>
       <div id="audit-list"></div>
     </section>
   </div>
+  <script src="https://unpkg.com/lucide@1.30.0"></script>
   <script src="/roles.js"></script>
   <script src="/commandPermissions.js"></script>
 </body>

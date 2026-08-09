@@ -85,6 +85,8 @@
       })
       .join('');
 
+    if (window.lucide) window.lucide.createIcons();
+
     list.querySelectorAll('[data-toggle]').forEach((el) => {
       el.addEventListener('click', () => {
         const cmdName = el.dataset.toggle;
@@ -121,8 +123,8 @@
     return `
       <div class="cmd-role-grid">${rolesHtml}</div>
       <div class="cmd-row-actions">
-        <button class="primary" data-save="${escapeHtml(cmd.name)}">Save</button>
-        <button data-clear="${escapeHtml(cmd.name)}">Reset to default</button>
+        <button class="primary" data-save="${escapeHtml(cmd.name)}"><i data-lucide="check"></i> Save</button>
+        <button data-clear="${escapeHtml(cmd.name)}"><i data-lucide="rotate-ccw"></i> Reset to default</button>
         <span class="hint" id="cmd-perms-error-${escapeHtml(cmd.name)}"></span>
       </div>`;
   }

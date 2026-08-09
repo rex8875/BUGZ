@@ -39,6 +39,7 @@ function renderGrid() {
   }
 
   list.innerHTML = `<div class="servers-grid">${servers.map((s, i) => serverCardHtml(s, i)).join('')}</div>`;
+  if (window.lucide) window.lucide.createIcons();
 
   servers.forEach((s) => {
     if (s.permissions.canManageSettings) {
@@ -72,12 +73,12 @@ function serverCardHtml(s, i = 0) {
   return `
     <div class="server-card-outer">
       <a class="server-card animate__animated animate__fadeInUp animate__faster" href="/dashboard/${s.id}" style="${bgCss}animation-delay:${Math.min(i, 12) * 40}ms">
-        ${s.permissions.canManageSettings ? `<button class="server-customize-btn" id="customize-btn-${s.id}">Customize</button>` : ''}
+        ${s.permissions.canManageSettings ? `<button class="server-customize-btn" id="customize-btn-${s.id}"><i data-lucide="palette"></i> Customize</button>` : ''}
         <div class="server-card-body">
           ${avatar}
           <div class="server-card-name">${escapeHtml(s.name)}</div>
         </div>
-        <div class="server-card-sub">${s.permissions.canManageBugs ? 'DEV ACCESS' : 'VIEW ACCESS'}</div>
+        <div class="server-card-sub"><i data-lucide="${s.permissions.canManageBugs ? 'wrench' : 'eye'}"></i> ${s.permissions.canManageBugs ? 'DEV ACCESS' : 'VIEW ACCESS'}</div>
       </a>
       <div id="appearance-panel-${s.id}"></div>
     </div>`;
@@ -88,14 +89,15 @@ function renderCustomizePanel(s) {
   if (!host) return;
   host.innerHTML = `
     <div class="appearance-panel animate__animated animate__fadeInDown animate__faster">
-      <h3>Background — ${escapeHtml(s.name)}</h3>
+      <h3><i data-lucide="palette"></i> Background — ${escapeHtml(s.name)}</h3>
       <div id="picker-mount-${s.id}"></div>
       <div class="quick-actions" style="border:none;margin-top:14px;padding-top:0;">
-        <button class="primary" id="save-appearance-${s.id}">Save background</button>
-        <button id="clear-appearance-${s.id}">Reset to default</button>
+        <button class="primary" id="save-appearance-${s.id}"><i data-lucide="check"></i> Save background</button>
+        <button id="clear-appearance-${s.id}"><i data-lucide="rotate-ccw"></i> Reset to default</button>
         <span class="hint" id="appearance-error-${s.id}"></span>
       </div>
     </div>`;
+  if (window.lucide) window.lucide.createIcons();
 
   const picker = window.FieldLogColorPicker.createAppearancePicker({
     container: document.getElementById(`picker-mount-${s.id}`),
