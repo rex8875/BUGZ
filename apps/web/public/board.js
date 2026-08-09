@@ -615,13 +615,162 @@ const searchInputEl = document.getElementById('search-input');
 searchInputEl.addEventListener('input', () => {
   clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(() => runSearch(searchInputEl.value), 400);
+  updateSuggestions();
 });
+searchInputEl.addEventListener('click', updateSuggestions);
 searchInputEl.addEventListener('keydown', (e) => {
+  if (handleSuggestKeydown(e)) return; // suggestion list consumed the key (nav/select/close)
   if (e.key === 'Enter') {
     clearTimeout(searchDebounceTimer);
     runSearch(searchInputEl.value);
   }
 });
+searchInputEl.addEventListener('blur', () => {
+  // Delay so a click on a suggestion (which also blurs the input) still registers.
+  setTimeout(() => hideSuggestions(), 150);
+});
+
+// ---- Search autocomplete: filter-key suggestions, live username
+// matches for by:, known device values for device:, and a real date
+// picker (Flatpickr) for before:/on:/after: — the "help me while I
+// type" affordance Discord's own search box has. ----
+
+const SEARCH_TOKEN_HELP = {
+  before: 'Reports created before a date',
+  on: 'Reports created on a specific date',
+  after: 'Reports created after a date',
+  by: 'Reports from a specific person',
+  device: 'Filter by device',
+};
+const DEVICE_VALUES = ['PC', 'Mobile', 'Tablet', 'Console'];
+const DATE_KEYS = ['before', 'on', 'after'];
+let suggestIndex = -1;
+let datePickerToken = null; // the token {start,end} a chosen date should be spliced into
+let flatpickrInstance = null;
+
+function getCurrentToken(value, cursorPos) {
+  const start = value.lastIndexOf(' ', cursorPos - 1) + 1;
+  let end = value.indexOf(' ', cursorPos);
+  if (end === -1) end = value.length;
+  return { text: value.slice(start, end), start, end };
+}
+
+function replaceToken(token, replacement) {
+  const value = searchInputEl.value;
+  const next = value.slice(0, token.start) + replacement + value.slice(token.end);
+  searchInputEl.value = next;
+  const cursor = token.start + replacement.length;
+  searchInputEl.setSelectionRange(cursor, cursor);
+  searchInputEl.focus();
+  clearTimeout(searchDebounceTimer);
+  runSearch(next);
+}
+
+function ensureDatePicker() {
+  if (flatpickrInstance || !window.flatpickr) return flatpickrInstance;
+  const anchor = document.createElement('input');
+  anchor.type = 'text';
+  anchor.style.cssText = 'position:absolute;width:0;height:0;opacity:0;pointer-events:none;';
+  document.getElementById('search-input').insertAdjacentElement('afterend', anchor);
+  flatpickrInstance = window.flatpickr(anchor, {
+    onChange: (dates) => {
+      if (!dates[0] || !datePickerToken) return;
+      const d = dates[0];
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const key = datePickerToken.text.split(':')[0];
+      replaceToken(datePickerToken, `${key}:${iso}`);
+      hideSuggestions();
+    },
+  });
+  return flatpickrInstance;
+}
+
+function suggestionItemsFor(token) {
+  const colonIdx = token.text.indexOf(':');
+  if (colonIdx === -1) {
+    const prefix = token.text.toLowerCase();
+    return SEARCH_TOKEN_KEYS.filter((k) => k.startsWith(prefix)).map((k) => ({
+      icon: DATE_KEYS.includes(k) ? 'calendar' : k === 'by' ? 'user' : 'monitor-smartphone',
+      label: `${k}:`,
+      hint: SEARCH_TOKEN_HELP[k],
+      apply: () => replaceToken(token, `${k}:`),
+    }));
+  }
+
+  const key = token.text.slice(0, colonIdx).toLowerCase();
+  const partial = token.text.slice(colonIdx + 1).toLowerCase();
+  if (!SEARCH_TOKEN_KEYS.includes(key)) return [];
+
+  if (DATE_KEYS.includes(key)) {
+    return [{ icon: 'calendar', label: 'Pick a date…', hint: 'Opens a calendar', apply: () => { datePickerToken = token; const fp = ensureDatePicker(); if (fp) fp.open(); } }];
+  }
+  if (key === 'device') {
+    return DEVICE_VALUES.filter((d) => d.toLowerCase().includes(partial)).map((d) => ({
+      icon: 'monitor-smartphone', label: d, apply: () => replaceToken(token, `device:${d}`),
+    }));
+  }
+  if (key === 'by') {
+    const usernames = [...new Set(state.reports.map((r) => r.reporter?.discordUsername).filter(Boolean))];
+    return usernames
+      .filter((u) => u.toLowerCase().includes(partial))
+      .slice(0, 8)
+      .map((u) => ({ icon: 'user', label: u, apply: () => replaceToken(token, `by:${u}`) }));
+  }
+  return [];
+}
+
+function updateSuggestions() {
+  const token = getCurrentToken(searchInputEl.value, searchInputEl.selectionStart);
+  const items = token.text.length > 0 ? suggestionItemsFor(token) : [];
+  const box = document.getElementById('search-suggest');
+  if (items.length === 0) {
+    hideSuggestions();
+    return;
+  }
+  suggestIndex = -1;
+  box.innerHTML = items
+    .map(
+      (item, i) => `
+      <div class="search-suggest-item" data-idx="${i}">
+        <i data-lucide="${item.icon}"></i>
+        <span class="search-suggest-label">${escapeHtml(item.label)}</span>
+        ${item.hint ? `<span class="search-suggest-hint">${escapeHtml(item.hint)}</span>` : ''}
+      </div>`,
+    )
+    .join('');
+  box.style.display = 'block';
+  if (window.lucide) window.lucide.createIcons();
+  box.querySelectorAll('.search-suggest-item').forEach((el, i) => {
+    el.addEventListener('mousedown', (e) => { e.preventDefault(); items[i].apply(); hideSuggestions(); });
+    el.addEventListener('mouseenter', () => setActiveSuggestion(i));
+  });
+  box.dataset.itemCount = items.length;
+  box._items = items;
+}
+
+function setActiveSuggestion(i) {
+  suggestIndex = i;
+  document.querySelectorAll('.search-suggest-item').forEach((el, idx) => el.classList.toggle('active', idx === i));
+}
+
+function hideSuggestions() {
+  const box = document.getElementById('search-suggest');
+  box.style.display = 'none';
+  box.innerHTML = '';
+  suggestIndex = -1;
+}
+
+function handleSuggestKeydown(e) {
+  const box = document.getElementById('search-suggest');
+  if (box.style.display === 'none') return false;
+  const items = box._items || [];
+  if (e.key === 'ArrowDown') { e.preventDefault(); setActiveSuggestion(Math.min(suggestIndex + 1, items.length - 1)); return true; }
+  if (e.key === 'ArrowUp') { e.preventDefault(); setActiveSuggestion(Math.max(suggestIndex - 1, 0)); return true; }
+  if (e.key === 'Enter' && suggestIndex >= 0) { e.preventDefault(); items[suggestIndex].apply(); hideSuggestions(); return true; }
+  if (e.key === 'Escape') { hideSuggestions(); return true; }
+  return false;
+}
+
 if (window.lucide) window.lucide.createIcons(); // static topbar icons present before load() runs
 
 load();

@@ -99,10 +99,8 @@ test('/bugs-by shows the specified user\'s reports, not the caller\'s', async ()
   }
 });
 
-test('/bug looks up a single report by its number and links to the public readable view', async () => {
+test('/bug looks up a single report by its number and shows it entirely in Discord, with no external link required', async () => {
   const { handler, dbModule, dbModulePath, originalDbCache } = loadWithFakeDb('../src/commands/bug.js');
-  const realBaseUrl = process.env.WEB_BASE_URL;
-  process.env.WEB_BASE_URL = 'https://bugz.example.com';
   const roleMock = installDiscordRoleMock();
   try {
     await seed(dbModule, roleMock, { reportCount: 3 });
@@ -118,9 +116,9 @@ test('/bug looks up a single report by its number and links to the public readab
 
     const embed = interaction._reply.embeds[0].data;
     assert.match(embed.title, /^#2 —/);
-    assert.equal(embed.url, `https://bugz.example.com/r/${(await dbModule.getBugReportByNumber((await dbModule.getServerByDiscordId('g1')).id, 2)).id}`);
+    assert.equal(embed.url, undefined, 'the report is shown fully in-Discord now — no external link needed to see it');
+    assert.equal(interaction._reply.ephemeral, true, 'should be a private reply, not posted to the whole channel');
   } finally {
-    process.env.WEB_BASE_URL = realBaseUrl;
     roleMock.restore();
     if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
     else delete require.cache[dbModulePath];

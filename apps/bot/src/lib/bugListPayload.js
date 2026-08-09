@@ -6,10 +6,9 @@ const STATUS_LABELS = {
 };
 
 function reportLine(r) {
-  const link = `${process.env.WEB_BASE_URL}/r/${r.id}`;
   const archivedTag = r.archivedAt ? ' *(archived)*' : '';
   const date = new Date(r.createdAt).toLocaleDateString();
-  return `**#${r.bugNumber} — ${r.title}**${archivedTag}\n${r.priority} · ${STATUS_LABELS[r.status] || r.status} · reported ${date} · [View](${link})`;
+  return `**#${r.bugNumber} — ${r.title}**${archivedTag}\n${r.priority} · ${STATUS_LABELS[r.status] || r.status} · reported ${date}`;
 }
 
 // mode/priority/search/targetDiscordId are round-tripped through the
@@ -26,16 +25,25 @@ function buildBugListPayload({ title, queryResult, mode, priority, search, targe
     .setTitle(title)
     .setColor(0x5865f2)
     .setDescription(reports.map(reportLine).join('\n\n'))
-    .setFooter({ text: `Page ${page} of ${totalPages} · ${totalCount} report${totalCount === 1 ? '' : 's'}` });
+    .setFooter({ text: `Page ${page} of ${totalPages} · ${totalCount} report${totalCount === 1 ? '' : 's'} · tap a # below to view one` });
 
   const encode = (p) => ['buglist', mode, p, priority || '-', encodeURIComponent((search || '-').slice(0, 40)), targetDiscordId || '-'].join(':');
 
-  const row = new ActionRowBuilder().addComponents(
+  const navRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(encode(page - 1)).setLabel('◀ Previous').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
     new ButtonBuilder().setCustomId(encode(page + 1)).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= totalPages),
   );
 
-  return { embeds: [embed], components: [row] };
+  // Read-only detail view, without ever leaving Discord: one small
+  // button per report on the page (pageSize is 5, so this always fits
+  // within Discord's 5-buttons-per-row limit). Clicking replies
+  // ephemerally with the same safe, evidence/F9-free view the public
+  // /r/:id webpage shows — see getBugReportPublic.
+  const viewRow = new ActionRowBuilder().addComponents(
+    ...reports.map((r) => new ButtonBuilder().setCustomId(`view:${r.id}`).setLabel(`#${r.bugNumber}`).setStyle(ButtonStyle.Secondary)),
+  );
+
+  return { embeds: [embed], components: [navRow, viewRow] };
 }
 
 function decodeBugListCustomId(customId) {

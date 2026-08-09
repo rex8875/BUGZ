@@ -1,7 +1,7 @@
-const { ButtonBuilder, ButtonStyle, ActionRowBuilder } = require('discord.js');
-const { getUserByDiscordId, getServerByDiscordId, getEffectivePermissions, createBugReport, countBugReportsByReporter, queryBugReports } = require('@bugtracker/db');
+const { ButtonBuilder, ButtonStyle, ActionRowBuilder, EmbedBuilder } = require('discord.js');
+const { getUserByDiscordId, getServerByDiscordId, getEffectivePermissions, createBugReport, countBugReportsByReporter, queryBugReports, getBugReportPublic } = require('@bugtracker/db');
 const { postNewReportAnnouncement } = require('../lib/announcements');
-const { buildBugListPayload, decodeBugListCustomId } = require('../lib/bugListPayload');
+const { buildBugListPayload, decodeBugListCustomId, STATUS_LABELS } = require('../lib/bugListPayload');
 const { checkCommandAccess } = require('../lib/commandAccess');
 const { buildCoreModal, buildEvidenceModal } = require('../lib/bugReportModals');
 const { saveDraft, getDraft, clearDraft } = require('../lib/bugReportDrafts');
@@ -82,6 +82,43 @@ module.exports = {
 
         const payload = buildBugListPayload({ title, queryResult, mode, priority, search, targetDiscordId, emptyMessage });
         return interaction.update(payload);
+      }
+
+      if (interaction.customId.startsWith('view:')) {
+        const reportId = interaction.customId.slice('view:'.length);
+        const server = await getServerByDiscordId(interaction.guildId);
+        if (!server) return interaction.reply({ content: 'This server is not set up yet.', ephemeral: true });
+
+        // Re-checked live, same as every other permission-gated action —
+        // a button in an old message shouldn't outlive someone's access.
+        const perms = await getEffectivePermissions(server.id, interaction.user.id);
+        if (!perms?.canViewDashboard) {
+          return interaction.reply({ content: "You don't have permission to view bug reports in this server.", ephemeral: true });
+        }
+
+        // getBugReportPublic is the exact same safe, evidence/F9-free
+        // shape the public /r/:id webpage uses — reused here rather
+        // than duplicated, so the two "read-only view" surfaces can
+        // never drift out of sync on what's safe to show.
+        const report = await getBugReportPublic(reportId);
+        if (!report || report.serverId !== server.id) {
+          return interaction.reply({ content: 'That report no longer exists.', ephemeral: true });
+        }
+
+        const embed = new EmbedBuilder()
+          .setTitle(`#${report.bugNumber} — ${report.title}`)
+          .setColor(0x5865f2)
+          .setDescription(report.description)
+          .addFields(
+            { name: 'Priority', value: report.priority, inline: true },
+            { name: 'Status', value: STATUS_LABELS[report.status] || report.status, inline: true },
+            { name: 'Device', value: report.device || 'unspecified', inline: true },
+            { name: 'Reported by', value: report.reporterUsername, inline: true },
+            { name: 'Date', value: new Date(report.createdAt).toLocaleDateString(), inline: true },
+          );
+        if (report.stepsToReproduce) embed.addFields({ name: 'Steps to reproduce', value: report.stepsToReproduce });
+
+        return interaction.reply({ embeds: [embed], ephemeral: true });
       }
 
       if (interaction.customId.startsWith('leaderboard_scope_') || interaction.customId.startsWith('leaderboard_refresh_')) {

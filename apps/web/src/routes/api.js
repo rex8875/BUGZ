@@ -70,6 +70,7 @@ router.get('/api/servers', async (req, res) => {
 
 router.get('/api/servers/:serverId/me', (req, res) => {
   res.json({
+    discordId: req.session.discordId,
     permissions: req.perms,
     retestChannelId: req.server.retestChannelId,
     testerPingRoleId: req.server.testerPingRoleId,

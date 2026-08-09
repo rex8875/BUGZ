@@ -2,8 +2,10 @@ const serverId = window.location.pathname.split('/')[2];
 document.getElementById('back-link').href = `/dashboard/${serverId}`;
 
 let canAdjust = false;
+let myDiscordId = null;
 let tab = 'all-time';
 let weekStart = null; // null = current week, server resolves it
+let hasCelebrated = false; // only fire confetti once per page load, not on every refresh
 
 async function api(path, options = {}) {
   const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
@@ -59,6 +61,7 @@ async function load() {
   try {
     const me = await api(`/api/servers/${serverId}/me`);
     canAdjust = me.permissions.canManageBugs;
+    myDiscordId = me.discordId;
 
     if (tab === 'all-time') {
       const scores = await api(`/api/servers/${serverId}/leaderboard`);
@@ -75,27 +78,68 @@ async function load() {
   }
 }
 
+function adjustButtonsHtml(discordId) {
+  if (tab !== 'all-time' || !canAdjust) return '';
+  return `
+    <div class="lb-adjust">
+      <button data-adjust="-1" title="Remove a point"><i data-lucide="minus"></i></button>
+      <button data-adjust="1" title="Add a point"><i data-lucide="plus"></i></button>
+    </div>`;
+}
+
+function podiumCardHtml(s, rank, maxPoints) {
+  const icon = rank === 1 ? 'trophy' : 'medal';
+  const barPct = maxPoints > 0 ? Math.max(6, Math.round((s.points / maxPoints) * 100)) : 0;
+  const isMe = s.user.discordId === myDiscordId;
+  return `
+    <div class="lb-podium-card rank-${rank} animate__animated animate__bounceIn" data-discord-id="${s.user.discordId}" style="animation-delay:${(3 - rank) * 130}ms">
+      <div class="lb-podium-icon"><i data-lucide="${icon}"></i></div>
+      <div class="lb-podium-rank">#${rank}</div>
+      <div class="lb-podium-name">${escapeHtml(s.user.discordUsername)} ${isMe ? '<span class="lb-you">YOU</span>' : ''}</div>
+      <div class="lb-podium-points">${s.points}<span>pt${s.points === 1 ? '' : 's'}</span></div>
+      <div class="lb-bar-track"><div class="lb-bar-fill" style="width:${barPct}%"></div></div>
+      ${adjustButtonsHtml(s.user.discordId)}
+    </div>`;
+}
+
+function listRowHtml(s, rank, maxPoints) {
+  const barPct = maxPoints > 0 ? Math.max(4, Math.round((s.points / maxPoints) * 100)) : 0;
+  const isMe = s.user.discordId === myDiscordId;
+  return `
+    <div class="lb-row animate__animated animate__fadeInUp animate__faster ${isMe ? 'lb-row-me' : ''}" data-discord-id="${s.user.discordId}" style="animation-delay:${Math.min(rank, 18) * 25}ms">
+      <div class="lb-rank-badge">${rank}</div>
+      <div class="lb-row-main">
+        <div class="lb-row-name">${escapeHtml(s.user.discordUsername)} ${isMe ? '<span class="lb-you">YOU</span>' : ''}</div>
+        <div class="lb-bar-track lb-bar-track-sm"><div class="lb-bar-fill" style="width:${barPct}%"></div></div>
+      </div>
+      <div class="lb-row-points">${s.points} <span>pt${s.points === 1 ? '' : 's'}</span></div>
+      ${adjustButtonsHtml(s.user.discordId)}
+    </div>`;
+}
+
 function render(scores) {
   const board = document.getElementById('board');
   if (scores.length === 0) {
-    board.innerHTML = '<div class="hint">No points here yet.</div>';
+    board.innerHTML = '<div class="hint lb-empty"><i data-lucide="inbox"></i> No points here yet.</div>';
+    if (window.lucide) window.lucide.createIcons();
     return;
   }
 
-  const medals = ['🥇', '🥈', '🥉'];
-  board.innerHTML = scores
-    .map((s, i) => {
-      const entranceClass = i < 3 ? 'animate__bounceIn' : 'animate__fadeInUp animate__faster';
-      const delay = i < 3 ? i * 120 : Math.min(i, 15) * 30 + 100;
-      return `
-      <div class="member-row animate__animated ${entranceClass}" data-discord-id="${s.user.discordId}" style="animation-delay:${delay}ms">
-        <div style="width:28px;">${medals[i] || i + 1}</div>
-        <div style="flex:1;">${escapeHtml(s.user.discordUsername)}</div>
-        <div><strong>${s.points}</strong> pt${s.points === 1 ? '' : 's'}</div>
-        ${tab === 'all-time' && canAdjust ? '<button data-adjust="-1">-1</button><button data-adjust="1">+1</button>' : ''}
-      </div>`;
-    })
-    .join('');
+  const maxPoints = scores[0].points;
+  const top3 = scores.slice(0, 3);
+  const rest = scores.slice(3);
+
+  const podiumOrder = top3.length === 3 ? [top3[1], top3[0], top3[2]] : top3; // 2nd, 1st, 3rd visual order
+  const podiumHtml = top3.length
+    ? `<div class="lb-podium">${podiumOrder.map((s) => podiumCardHtml(s, scores.indexOf(s) + 1, maxPoints)).join('')}</div>`
+    : '';
+
+  const listHtml = rest.length
+    ? `<div class="lb-list">${rest.map((s, i) => listRowHtml(s, i + 4, maxPoints)).join('')}</div>`
+    : '';
+
+  board.innerHTML = podiumHtml + listHtml;
+  if (window.lucide) window.lucide.createIcons();
 
   board.querySelectorAll('[data-adjust]').forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -111,6 +155,18 @@ function render(scores) {
       }
     });
   });
+
+  const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!hasCelebrated && !reducedMotion && tab === 'all-time' && top3.length && typeof window.confetti === 'function') {
+    hasCelebrated = true;
+    window.confetti({
+      particleCount: 90,
+      spread: 70,
+      origin: { y: 0.35 },
+      colors: ['#f5a623', '#ffd166', '#ffffff'], // on-brand amber palette, not the library's default rainbow
+      disableForReducedMotion: true,
+    });
+  }
 }
 
 load();

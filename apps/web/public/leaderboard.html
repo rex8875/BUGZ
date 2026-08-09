@@ -8,8 +8,8 @@
 <body>
   <div class="container">
     <div class="topbar">
-      <h1>Leaderboard</h1>
-      <a id="back-link" href=""><button>Back to dashboard</button></a>
+      <h1><i data-lucide="trophy"></i> Leaderboard</h1>
+      <a id="back-link" href=""><button><i data-lucide="arrow-left"></i> Back to dashboard</button></a>
     </div>
     <div id="error" class="error-banner" style="display:none;"></div>
     <div class="hint" style="margin-bottom:14px;">One point per bug reported. Marking a report Duplicate reverses the point.</div>
@@ -17,13 +17,15 @@
       <div class="filter-pill active" data-tab="all-time">All-time</div>
       <div class="filter-pill" data-tab="weekly">This week</div>
     </div>
-    <div id="week-nav" style="display:none; margin-bottom:10px;">
-      <button id="prev-week">← Previous week</button>
+    <div id="week-nav" style="display:none; margin-bottom:16px;">
+      <button id="prev-week"><i data-lucide="chevron-left"></i> Previous week</button>
       <span id="week-label" class="hint"></span>
-      <button id="next-week">Next week →</button>
+      <button id="next-week">Next week <i data-lucide="chevron-right"></i></button>
     </div>
     <div id="board"></div>
   </div>
+  <script src="https://unpkg.com/lucide@1.30.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
   <script src="/leaderboard.js"></script>
 </body>
 </html>

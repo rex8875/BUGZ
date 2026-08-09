@@ -23,10 +23,8 @@ module.exports = {
       return interaction.reply({ content: `No bug #${number} found in this server.`, ephemeral: true });
     }
 
-    const link = `${process.env.WEB_BASE_URL}/r/${report.id}`;
     const embed = new EmbedBuilder()
       .setTitle(`#${report.bugNumber} — ${report.title}`)
-      .setURL(link)
       .setColor(0x5865f2)
       .setDescription(report.description)
       .addFields(
@@ -36,6 +34,7 @@ module.exports = {
         { name: 'Reported by', value: report.reporter?.discordUsername || 'unknown', inline: true },
         { name: 'Reported on', value: new Date(report.createdAt).toLocaleDateString(), inline: true },
       );
+    if (report.stepsToReproduce) embed.addFields({ name: 'Steps to reproduce', value: report.stepsToReproduce });
     if (report.archivedAt) embed.setFooter({ text: 'This report is archived.' });
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
