@@ -192,14 +192,15 @@ module.exports = {
         const draft = getDraft(interaction.user.id);
         if (!draft) {
           // The modal was already open when the draft expired/cleared out
-          // from under it. Disable the originating button too, so a second
-          // stale click can't get back in here.
-          if (interaction.message) {
-            await interaction.message.edit({ components: [] }).catch(() => {});
-          }
-          return interaction.reply({
+          // from under it. Update the very message the Continue button
+          // lives on directly, in one step, rather than leaving it
+          // untouched and sending a second, separate message — a second
+          // click on a since-emptied button is not how anyone should
+          // have to discover their draft expired.
+          return interaction.update({
             content: 'Your draft expired before you finished. Click "Report bug" again to start over.',
-            ephemeral: true,
+            embeds: [],
+            components: [],
           });
         }
 
@@ -218,10 +219,12 @@ module.exports = {
             additionalInfo,
           });
         } catch (err) {
-          // Leave the draft and the Continue button alive on failure
-          // (e.g. validation error) so the person can retry without
-          // re-typing modal 1.
-          return interaction.reply({ content: err.message, ephemeral: true });
+          // Leave the draft alive on failure (e.g. validation error) so
+          // the person can retry without re-typing modal 1 — update the
+          // same message in place with the error and a fresh Continue
+          // button, rather than leaving a stale button sitting under a
+          // separate, easy-to-miss error reply.
+          return interaction.update({ content: `${err.message} Click Continue to try again.`, embeds: [], components: continueButtonRow() });
         }
 
         clearDraft(interaction.user.id);
@@ -244,13 +247,13 @@ module.exports = {
             .catch(() => {});
         }
 
-        // The report is in — disable the Continue button on the modal-1
-        // reply message so a stale click can never reopen this form again.
-        if (interaction.message) {
-          await interaction.message.edit({ content: 'Bug report submitted — thanks!', components: [] }).catch(() => {});
-        }
-
-        return interaction.reply({ content: 'Bug report submitted — thanks!', ephemeral: true });
+        // Update the exact message the Continue button was on, in one
+        // atomic step, as this interaction's own primary response —
+        // rather than a best-effort separate edit plus a second new
+        // reply. The button disappears and the same message becomes
+        // the confirmation; nothing stale is left behind, and there's
+        // no second message to notice or reclick anything on.
+        return interaction.update({ content: 'Bug report submitted — thanks!', embeds: [], components: [] });
       }
     }
   },
