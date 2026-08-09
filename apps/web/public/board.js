@@ -45,6 +45,40 @@ function showError(message) {
   }
 }
 
+// Lightweight success/info confirmation for actions that previously
+// gave no visible feedback beyond a re-render — guarded so it's a
+// harmless no-op wherever SweetAlert2 isn't loaded (e.g. tests).
+function showToast(icon, title) {
+  if (!window.Swal) return;
+  window.Swal.fire({ toast: true, position: 'top-end', icon, title, showConfirmButton: false, timer: 2200, timerProgressBar: true });
+}
+
+// Real, styled confirm/prompt dialogs instead of the browser's native
+// unstyled confirm()/prompt() (which can't be themed at all and look
+// completely out of place next to the rest of the UI). Falls back to
+// the native dialogs wherever SweetAlert2 isn't loaded, so this stays
+// fully testable without depending on a network-loaded script.
+async function confirmDialog({ title, text, confirmText = 'Confirm', danger = false }) {
+  if (!window.Swal) return window.confirm(`${title}\n${text || ''}`);
+  const result = await window.Swal.fire({
+    title, text, icon: 'warning', showCancelButton: true,
+    confirmButtonText: confirmText, cancelButtonText: 'Cancel',
+    confirmButtonColor: danger ? '#e5484d' : undefined,
+    reverseButtons: true,
+  });
+  return result.isConfirmed;
+}
+
+async function promptDialog({ title, initialValue = '' }) {
+  if (!window.Swal) return window.prompt(title, initialValue);
+  const result = await window.Swal.fire({
+    title, input: 'text', inputValue: initialValue,
+    showCancelButton: true, confirmButtonText: 'Save', cancelButtonText: 'Cancel',
+    inputValidator: (value) => (!value || !value.trim() ? 'Cannot be empty' : undefined),
+  });
+  return result.isConfirmed ? result.value : null;
+}
+
 async function load() {
   try {
     const me = await api(`/api/servers/${serverId}/me`);
@@ -359,30 +393,43 @@ function bindDetailPanelEvents() {
 
   const editTitleBtn = panel.querySelector('[data-edit-title]');
   if (editTitleBtn) {
-    editTitleBtn.addEventListener('click', () => {
-      const next = prompt('New title', report.title);
-      if (next && next.trim()) updateReport(report.id, { title: next.trim() });
+    editTitleBtn.addEventListener('click', async () => {
+      const next = await promptDialog({ title: 'New title', initialValue: report.title });
+      if (next && next.trim()) {
+        await updateReport(report.id, { title: next.trim() });
+        showToast('success', 'Title updated');
+      }
     });
   }
 
   const editDescBtn = panel.querySelector('[data-edit-description]');
   if (editDescBtn) {
-    editDescBtn.addEventListener('click', () => {
-      const next = prompt('New description', report.description);
-      if (next && next.trim()) updateReport(report.id, { description: next.trim() });
+    editDescBtn.addEventListener('click', async () => {
+      const next = await promptDialog({ title: 'New description', initialValue: report.description });
+      if (next && next.trim()) {
+        await updateReport(report.id, { description: next.trim() });
+        showToast('success', 'Description updated');
+      }
     });
   }
 
   const deleteBtn = panel.querySelector('[data-delete-report]');
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async () => {
-      if (!confirm('Permanently delete this report? This cannot be undone.')) return;
+      const confirmed = await confirmDialog({
+        title: 'Delete this report?',
+        text: 'This cannot be undone.',
+        confirmText: 'Delete permanently',
+        danger: true,
+      });
+      if (!confirmed) return;
       try {
         await api(`/api/servers/${serverId}/reports/${report.id}`, { method: 'DELETE' });
         state.reports = state.reports.filter((r) => r.id !== report.id);
         state.expandedId = null;
         renderList();
         loadSummary();
+        showToast('success', 'Report deleted');
       } catch (err) {
         showError(err.message);
       }
@@ -401,12 +448,15 @@ async function updateReport(id, data) {
   }
 }
 
+const ACTION_TOAST = { ping: 'Testers pinged', retest: 'Posted to retest channel', archive: 'Report archived' };
+
 async function runAction(id, action) {
   try {
     const updated = await api(`/api/servers/${serverId}/reports/${id}/${action}`, { method: 'POST' });
     state.reports = state.reports.map((r) => (r.id === id ? updated : r));
     renderList();
     if (action === 'archive') loadSummary();
+    if (ACTION_TOAST[action]) showToast('success', ACTION_TOAST[action]);
   } catch (err) {
     showError(err.message);
   }
@@ -553,6 +603,7 @@ async function renderSettings() {
           }),
         });
         await renderSettings();
+        showToast('success', 'Share link created');
       } catch (err) {
         showError(err.message);
       }
@@ -584,6 +635,7 @@ function renderLinkList(links) {
       try {
         await api(`/api/servers/${serverId}/share-links/${btn.dataset.revoke}/revoke`, { method: 'POST' });
         await renderSettings();
+        showToast('success', 'Share link revoked');
       } catch (err) {
         showError(err.message);
       }

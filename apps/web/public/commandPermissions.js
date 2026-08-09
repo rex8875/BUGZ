@@ -27,6 +27,11 @@
     return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  function showToast(icon, title) {
+    if (!window.Swal) return;
+    window.Swal.fire({ toast: true, position: 'top-end', icon, title, showConfirmButton: false, timer: 2200, timerProgressBar: true });
+  }
+
   async function loadCommandPermissions() {
     const host = document.getElementById('cmd-perms-list');
     host.innerHTML = '<span class="loading-pulse">Loading commands…</span>';
@@ -161,6 +166,7 @@
         saveBtn.classList.add('save-success');
         saveBtn.textContent = 'Saved ✓';
       }
+      showToast('success', discordRoleIds.length > 0 ? 'Command restricted to selected roles' : 'Reset to default access');
       setTimeout(() => {
         expandedCommand = null;
         pendingSelection = null;

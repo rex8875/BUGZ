@@ -873,3 +873,56 @@ section h2 { font-family: var(--font-display); font-size: 16px; color: var(--tex
 .flatpickr-day.today { border-color: var(--amber) !important; }
 .flatpickr-prev-month svg, .flatpickr-next-month svg { fill: var(--text-dim) !important; }
 .flatpickr-prev-month:hover svg, .flatpickr-next-month:hover svg { fill: var(--amber) !important; }
+
+/* ---- SweetAlert2, re-themed with the app's own tokens rather than
+   a generic theme package, so modals/toasts read as one system with
+   everything else instead of a bolted-on library look. Replaces the
+   native confirm()/prompt() dialogs (which can't be styled at all and
+   visibly break the custom UI) plus the ad-hoc plain-text error/
+   success feedback used throughout. ---- */
+
+.swal2-popup {
+  background: var(--ink-card) !important;
+  border: 1px solid var(--line-bright) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.55) !important;
+  font-family: var(--font-body) !important;
+  color: var(--text) !important;
+}
+.swal2-title { font-family: var(--font-display) !important; color: var(--text) !important; font-size: 22px !important; }
+.swal2-html-container { color: var(--text-dim) !important; font-size: 14px !important; }
+.swal2-icon.swal2-warning { border-color: var(--critical) !important; color: var(--critical) !important; }
+.swal2-icon.swal2-success [class^='swal2-success-line'] { background-color: var(--amber) !important; }
+.swal2-icon.swal2-success .swal2-success-ring { border-color: rgba(245,166,35,0.3) !important; }
+.swal2-input {
+  background: var(--ink) !important;
+  border: 1px solid var(--line-bright) !important;
+  color: var(--text) !important;
+  border-radius: 6px !important;
+  font-family: var(--font-body) !important;
+  box-shadow: none !important;
+}
+.swal2-input:focus { border-color: var(--amber) !important; box-shadow: 0 0 0 1px var(--amber) !important; }
+.swal2-confirm.swal2-styled {
+  background: var(--amber) !important;
+  color: #1a1206 !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+.swal2-confirm.swal2-styled:focus { box-shadow: 0 0 0 2px var(--amber-dim) !important; }
+.swal2-cancel.swal2-styled {
+  background: var(--ink-raised) !important;
+  color: var(--text) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+.swal2-deny.swal2-styled { background: var(--critical) !important; border-radius: 6px !important; box-shadow: none !important; }
+.swal2-timer-progress-bar { background: var(--amber) !important; }
+
+.swal2-toast {
+  background: var(--ink-card) !important;
+  border: 1px solid var(--line-bright) !important;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.45) !important;
+}
+.swal2-toast .swal2-title { font-size: 13px !important; font-family: var(--font-body) !important; font-weight: 600 !important; }

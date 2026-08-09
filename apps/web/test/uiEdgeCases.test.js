@@ -138,3 +138,106 @@ test('board.html: the detail panel\'s close button collapses it back to quick vi
   assert.equal(doc.querySelector('#report-list .detail-panel'), null, 'the close button must remove the detail panel entirely, with no page reload required');
   assert.ok(doc.querySelector('.report-row.selected'), 'the row itself should remain selected (quick view), only the full view collapses');
 });
+
+test('board.html: deleting a report requires confirmation — cancelling must not send a delete request', async () => {
+  const calls = [];
+  const dom = await renderPage({
+    htmlFile: 'board.html', scripts: ['board.js'],
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), method: options.method || 'GET' });
+      if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
+      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+    },
+  });
+  const doc = dom.window.document;
+  dom.window.confirm = () => false; // SweetAlert2 isn't loaded in this test sandbox, so the code falls back to window.confirm
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  doc.querySelector('[data-delete-report]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(calls.some((c) => c.method === 'DELETE'), false, 'cancelling the confirmation must never send the delete request');
+  assert.ok(doc.querySelector('#report-list .detail-panel'), 'the report should still be visible, nothing was deleted');
+});
+
+test('board.html: confirming the delete dialog actually removes the report from the list', async () => {
+  const calls = [];
+  const dom = await renderPage({
+    htmlFile: 'board.html', scripts: ['board.js'],
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), method: options.method || 'GET' });
+      if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
+      if (options.method === 'DELETE') return { ok: true, status: 200, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+    },
+  });
+  const doc = dom.window.document;
+  dom.window.confirm = () => true;
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  doc.querySelector('[data-delete-report]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.ok(calls.some((c) => c.method === 'DELETE' && c.url.includes('r1')), 'confirming should send the DELETE request for the right report');
+  assert.equal(doc.querySelector('.report-row'), null, 'the deleted report must no longer appear in the list');
+});
+
+test('board.html: editing the title cancels cleanly if the dialog is dismissed — no PATCH sent', async () => {
+  const calls = [];
+  const dom = await renderPage({
+    htmlFile: 'board.html', scripts: ['board.js'],
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), method: options.method || 'GET' });
+      if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
+      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Original title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+    },
+  });
+  const doc = dom.window.document;
+  dom.window.prompt = () => null; // dismissed
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  doc.querySelector('[data-edit-title]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  assert.equal(calls.some((c) => c.method === 'PATCH'), false, 'dismissing the title dialog must never send a PATCH request');
+});
+
+test('board.html: editing the title actually updates it when a new value is given', async () => {
+  const calls = [];
+  const dom = await renderPage({
+    htmlFile: 'board.html', scripts: ['board.js'],
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), method: options.method || 'GET', body: options.body });
+      if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
+      if (options.method === 'PATCH') return { ok: true, status: 200, json: async () => ({ id: 'r1', title: 'Brand new title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString() }) };
+      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Original title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+    },
+  });
+  const doc = dom.window.document;
+  dom.window.prompt = () => 'Brand new title';
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  doc.querySelector('[data-edit-title]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  const patchCall = calls.find((c) => c.method === 'PATCH');
+  assert.ok(patchCall, 'a PATCH request should have been sent');
+  assert.deepEqual(JSON.parse(patchCall.body), { title: 'Brand new title' });
+  assert.match(doc.querySelector('.report-row .title').textContent, /Brand new title/);
+});

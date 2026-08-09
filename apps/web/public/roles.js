@@ -42,6 +42,11 @@ function showError(message) {
   }
 }
 
+function showToast(icon, title) {
+  if (!window.Swal) return;
+  window.Swal.fire({ toast: true, position: 'top-end', icon, title, showConfirmButton: false, timer: 2200, timerProgressBar: true });
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -173,6 +178,7 @@ function wireExpandedRoleControls(roleId) {
         delete configuredByRoleId[roleId];
         expandedRoleId = null;
         renderRoleList();
+        showToast('success', 'Role reset to default (no access)');
       } catch (err) {
         document.getElementById(`role-perms-error-${roleId}`).textContent = err.message;
       }
@@ -195,6 +201,7 @@ document.getElementById('ban-member-btn').addEventListener('click', async () => 
     document.getElementById('ban-member-id').value = '';
     document.getElementById('ban-member-reason').value = '';
     await load();
+    showToast('success', 'Member banned');
   } catch (err) {
     showError(err.message);
   }
@@ -230,6 +237,7 @@ function renderBanned(banned) {
       try {
         await api(`/api/servers/${serverId}/members/${discordId}/unban`, { method: 'POST' });
         await load();
+        showToast('success', 'Member unbanned');
       } catch (err) {
         showError(err.message);
       }
