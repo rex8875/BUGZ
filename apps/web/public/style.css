@@ -103,6 +103,73 @@
 ::-webkit-scrollbar-thumb:hover { background: var(--amber); }
 ::-webkit-scrollbar-corner { background: transparent; }
 
+/* ---- Server rail — Discord's own left-edge server switcher,
+   reproduced here so switching servers doesn't require going back to
+   the "All servers" grid first. Circle-at-rest, rounded-square-on-
+   active/hover with a left-edge indicator pill is Discord's own
+   well-established interaction; kept the mechanic but replaced their
+   white/blurple with our own amber, and gave the icons real elevation
+   consistent with the rest of the app instead of flat circles. ---- */
+
+#server-rail {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 64px;
+  background: var(--ink-raised);
+  border-right: 1px solid var(--line);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 30;
+}
+
+.rail-icon {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--ink-card);
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+  transition: border-radius 160ms ease, background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+.rail-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rail-icon svg { width: 20px; height: 20px; }
+.rail-initials { font-family: var(--font-display); font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
+
+.rail-icon::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 0;
+  border-radius: 0 4px 4px 0;
+  background: var(--amber-bright);
+  transition: height 160ms ease;
+}
+.rail-icon:hover { border-radius: 16px; background: var(--amber-dim); color: var(--amber-bright); box-shadow: var(--shadow-md); }
+.rail-icon:hover::before { height: 20px; }
+.rail-icon.rail-active { border-radius: 16px; background: var(--amber-dim); color: var(--amber-bright); box-shadow: var(--shadow-md); }
+.rail-icon.rail-active::before { height: 32px; }
+
+.rail-divider { width: 32px; height: 2px; background: var(--line); border-radius: 1px; margin: 2px 0 4px; flex-shrink: 0; }
+.rail-servers { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
@@ -112,6 +179,7 @@ html { background: var(--ink); }
 body {
   margin: 0;
   min-height: 100vh;
+  padding-left: 64px; /* room for the fixed server rail, present on every page */
   background:
     linear-gradient(180deg, rgba(16,19,26,0.2), rgba(16,19,26,0.9) 240px, var(--ink) 480px),
     repeating-linear-gradient(0deg, rgba(255,255,255,0.028) 0px, rgba(255,255,255,0.028) 1px, transparent 1px, transparent 28px),
