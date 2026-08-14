@@ -12,10 +12,39 @@ async function logAction(serverId, actorDiscordId, action, details) {
 }
 
 async function listAuditLog(serverId, limit = 100) {
-  return prisma.auditLogEntry.findMany({
+  const entries = await prisma.auditLogEntry.findMany({
     where: { serverId },
     orderBy: { createdAt: 'desc' },
     take: limit,
+  });
+
+  // Resolve raw Discord IDs to display names in one batched lookup rather
+  // than a query per row — covers the actor plus whichever user a given
+  // action targets (details.target / details.to, the two field names
+  // every logAction() call site uses for "the other person involved").
+  const discordIds = new Set();
+  for (const e of entries) {
+    discordIds.add(e.actorDiscordId);
+    try {
+      const parsed = e.details ? JSON.parse(e.details) : null;
+      if (parsed?.target) discordIds.add(parsed.target);
+      if (parsed?.to) discordIds.add(parsed.to);
+    } catch { /* malformed details shouldn't break the whole log */ }
+  }
+  const users = await prisma.user.findMany({ where: { discordId: { in: [...discordIds] } } });
+  const nameById = new Map(users.map((u) => [u.discordId, u.discordUsername]));
+
+  return entries.map((e) => {
+    let targetUsername;
+    try {
+      const parsed = e.details ? JSON.parse(e.details) : null;
+      const targetId = parsed?.target || parsed?.to;
+      if (targetId) targetUsername = nameById.get(targetId) || targetId;
+    } catch { /* ignore */ }
+    // Falls back to the raw ID for anyone without a User row (never
+    // verified) so an entry never disappears or errors — it just shows
+    // the ID as before for that one case.
+    return { ...e, actorUsername: nameById.get(e.actorDiscordId) || e.actorDiscordId, targetUsername };
   });
 }
 
@@ -96,6 +125,7 @@ async function resetLeaderboardScore({ serverId, actingDiscordId, targetDiscordI
 
   await prisma.leaderboardScore.updateMany({ where: { serverId, userId: user.id }, data: { points: 0, hiddenAt: null } });
   await prisma.weeklyScore.updateMany({ where: { serverId, userId: user.id }, data: { points: 0, hiddenAt: null } });
+  await logAction(serverId, actingDiscordId, 'SCORE_RESET', { target: targetDiscordId });
 }
 
 async function updateServerSettings({ serverId, actingDiscordId, retestChannelId, testerPingRoleId, announceChannelId }) {
@@ -175,7 +205,7 @@ async function transferOwnership({ serverId, actingDiscordId, newOwnerDiscordId 
 
   const newOwner = await prisma.user.findUnique({ where: { discordId: newOwnerDiscordId } });
   if (!newOwner) {
-    throw new Error('That person has not verified yet — they need to verify before they can be made owner.');
+    throw new Error('That person has not verified yet.');
   }
 
   await prisma.server.update({ where: { id: serverId }, data: { ownerDiscordId: newOwnerDiscordId } });
@@ -562,24 +592,33 @@ function getWeekStart(date) {
 }
 
 async function adjustLeaderboardPoints(serverId, userId, delta) {
+  // A plain Prisma `increment` has no floor, so repeated negative
+  // adjustments (or a duplicate deduction landing on an already-low
+  // score) could push points below 0. Read-then-clamp instead of
+  // increment so the floor applies on every update, not just on the
+  // first row a user ever gets.
+  const existing = await prisma.leaderboardScore.findUnique({ where: { serverId_userId: { serverId, userId } } });
+  const nextPoints = Math.max(0, (existing?.points ?? 0) + delta);
   await prisma.leaderboardScore.upsert({
     where: { serverId_userId: { serverId, userId } },
-    update: { points: { increment: delta } },
-    create: { serverId, userId, points: Math.max(delta, 0) },
+    update: { points: nextPoints },
+    create: { serverId, userId, points: nextPoints },
   });
 }
 
 async function adjustWeeklyPoints(serverId, userId, weekStart, delta) {
+  const existing = await prisma.weeklyScore.findUnique({ where: { serverId_userId_weekStart: { serverId, userId, weekStart } } });
+  const nextPoints = Math.max(0, (existing?.points ?? 0) + delta);
   await prisma.weeklyScore.upsert({
     where: { serverId_userId_weekStart: { serverId, userId, weekStart } },
-    update: { points: { increment: delta } },
-    create: { serverId, userId, weekStart, points: Math.max(delta, 0) },
+    update: { points: nextPoints },
+    create: { serverId, userId, weekStart, points: nextPoints },
   });
 }
 
 async function getLeaderboard(serverId) {
   return prisma.leaderboardScore.findMany({
-    where: { serverId, hiddenAt: null },
+    where: { serverId, hiddenAt: null, points: { gte: 1 } },
     include: { user: true },
     orderBy: { points: 'desc' },
   });
@@ -593,7 +632,7 @@ async function getLeaderboard(serverId) {
 async function getWeeklyLeaderboard(serverId, { weekStart } = {}) {
   const week = weekStart ? getWeekStart(weekStart) : getWeekStart(new Date());
   const scores = await prisma.weeklyScore.findMany({
-    where: { serverId, weekStart: week, hiddenAt: null },
+    where: { serverId, weekStart: week, hiddenAt: null, points: { gte: 1 } },
     include: { user: true },
     orderBy: { points: 'desc' },
   });
@@ -936,7 +975,10 @@ async function updateBugReport({ serverId, actingDiscordId, bugReportId, request
 
   if (perms?.canManageBugs) {
     if (requestedChanges.priority !== undefined) data.priority = requestedChanges.priority;
-    if (requestedChanges.status !== undefined) data.status = requestedChanges.status;
+    if (requestedChanges.status !== undefined) {
+      if (existing.archivedAt) throw new Error('Status is locked while this report is archived — unarchive it first.');
+      data.status = requestedChanges.status;
+    }
   }
   if (perms?.canEditReports) {
     for (const field of ['title', 'description', 'stepsToReproduce', 'device', 'additionalInfo']) {
@@ -948,9 +990,11 @@ async function updateBugReport({ serverId, actingDiscordId, bugReportId, request
     if (requestedChanges.retestThreadId !== undefined) data.retestThreadId = requestedChanges.retestThreadId;
   }
   if (perms?.canArchive && requestedChanges.archivedAt !== undefined) {
-    const terminal = ['FIXED', 'NOT_A_BUG', 'DUPLICATE', 'WONT_FIX'];
-    if (!terminal.includes(data.status || existing.status)) {
-      throw new Error("Status must be Fixed, Not a bug, Duplicate, or Won't fix before archiving.");
+    if (requestedChanges.archivedAt) {
+      const terminal = ['FIXED', 'NOT_A_BUG', 'DUPLICATE', 'WONT_FIX'];
+      if (!terminal.includes(data.status || existing.status)) {
+        throw new Error("Status must be Fixed, Not a bug, Duplicate, or Won't fix before archiving.");
+      }
     }
     data.archivedAt = requestedChanges.archivedAt;
   }

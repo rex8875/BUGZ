@@ -173,3 +173,40 @@ test('Dev CAN manage reports, including archiving once the report reaches a term
     assert.ok(archived.archivedAt, 'archiving should succeed once status is terminal');
   });
 });
+
+test('status is locked while a report is archived, and unarchiving restores it', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServerWithDevAndTester(db);
+  await withDiscordRoles({ dev1: [DEV_ROLE], tester1: [TESTER_ROLE] }, async () => {
+    const report = await db.createBugReport(server.id, 'tester1', { title: 'orig', description: 'd', priority: 'LOW', status: 'NEW' });
+    await db.updateBugReport({ serverId: server.id, actingDiscordId: 'dev1', bugReportId: report.id, requestedChanges: { status: 'FIXED' } });
+    await db.updateBugReport({ serverId: server.id, actingDiscordId: 'dev1', bugReportId: report.id, requestedChanges: { archivedAt: new Date() } });
+
+    await assert.rejects(
+      () => db.updateBugReport({ serverId: server.id, actingDiscordId: 'dev1', bugReportId: report.id, requestedChanges: { status: 'NEW' } }),
+      /locked while this report is archived/,
+      'status cannot change while archived',
+    );
+
+    const unarchived = await db.updateBugReport({ serverId: server.id, actingDiscordId: 'dev1', bugReportId: report.id, requestedChanges: { archivedAt: null } });
+    assert.equal(unarchived.archivedAt, null, 'unarchiving should succeed');
+
+    const restatused = await db.updateBugReport({ serverId: server.id, actingDiscordId: 'dev1', bugReportId: report.id, requestedChanges: { status: 'NEW' } });
+    assert.equal(restatused.status, 'NEW', 'status is editable again once unarchived');
+  });
+});
+
+test('unarchiving works even if status somehow drifted to non-terminal while archived (pre-existing data, not reachable via the API anymore now that status is locked)', async () => {
+  const { db, fakeClient } = loadDbWithFakePrisma();
+  const { server } = await setupServerWithDevAndTester(db);
+  await withDiscordRoles({ dev1: [DEV_ROLE], tester1: [TESTER_ROLE] }, async () => {
+    const report = await db.createBugReport(server.id, 'tester1', { title: 'orig', description: 'd', priority: 'LOW', status: 'NEW' });
+    // Force the edge case directly, bypassing updateBugReport's own rules,
+    // to simulate data from before the status lock existed.
+    fakeClient.bugReport.update({ where: { id: report.id }, data: { status: 'FIXED', archivedAt: new Date() } });
+    fakeClient.bugReport.update({ where: { id: report.id }, data: { status: 'NEW' } });
+
+    const unarchived = await db.updateBugReport({ serverId: server.id, actingDiscordId: 'dev1', bugReportId: report.id, requestedChanges: { archivedAt: null } });
+    assert.equal(unarchived.archivedAt, null, 'unarchiving must never be blocked by the terminal-status check — that check is for archiving, not for clearing archivedAt');
+  });
+});

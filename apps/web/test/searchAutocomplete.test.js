@@ -39,10 +39,10 @@ test('typing a partial filter key shows matching key suggestions', async () => {
   const dom = await renderPage({ htmlFile: 'board.html', scripts: ['board.js'], fetchImpl: baseFetch([]) });
   const box = typeAndGetSuggestions(dom, 'b');
   assert.equal(box.style.display, 'block');
-  const labels = [...box.querySelectorAll('.search-suggest-label')].map((el) => el.textContent);
-  assert.ok(labels.includes('before:'), 'should suggest before: for prefix "b"');
-  assert.ok(labels.includes('by:'), 'should suggest by: for prefix "b"');
-  assert.ok(!labels.includes('on:'), 'should NOT suggest on: since it does not start with "b"');
+  const subs = [...box.querySelectorAll('.search-suggest-sub')].map((el) => el.textContent);
+  assert.ok(subs.some((s) => s.startsWith('before:')), 'should suggest before: for prefix "b"');
+  assert.ok(subs.some((s) => s.startsWith('by:')), 'should suggest by: for prefix "b"');
+  assert.ok(!subs.some((s) => s.startsWith('on:')), 'should NOT suggest on: since it does not start with "b"');
 });
 
 test('typing by:<partial> suggests matching reporter usernames from the currently loaded reports', async () => {
@@ -69,7 +69,7 @@ test('clicking a key suggestion splices it into just the current token, leaving 
   const doc = dom.window.document;
   const input = doc.getElementById('search-input');
   const box = typeAndGetSuggestions(dom, 'crash by');
-  const byItem = [...box.querySelectorAll('.search-suggest-item')].find((el) => el.querySelector('.search-suggest-label').textContent === 'by:');
+  const byItem = [...box.querySelectorAll('.search-suggest-item')].find((el) => el.querySelector('.search-suggest-sub').textContent.startsWith('by:'));
   byItem.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, cancelable: true }));
   await new Promise((r) => setTimeout(r, 10));
   assert.equal(input.value, 'crash by:', 'only the "by" token should be replaced with "by:", the leading "crash " must survive untouched');

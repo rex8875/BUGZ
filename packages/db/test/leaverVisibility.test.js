@@ -67,14 +67,24 @@ test('rejoining (restoreLeaderboardVisibilityOnRejoin) automatically un-hides â€
   assert.equal((await db.getLeaderboard(server.id)).length, 1);
 });
 
-test('an owner can manually reset a score to zero, independent of leave/rejoin state', async () => {
+test('an owner can manually reset a score to zero â€” falls below the leaderboard\'s 1-point floor, but is not "hidden" in the leaver sense', async () => {
   const { db } = loadDbWithFakePrisma();
   const server = await setupServerWithScoredTester(db);
 
   await db.resetLeaderboardScore({ serverId: server.id, actingDiscordId: 'owner1', targetDiscordId: 'tester1' });
   const scores = await db.getLeaderboard(server.id);
-  assert.equal(scores.length, 1, 'a reset score should still be visible (0 is a valid score, not hidden)');
-  assert.equal(scores[0].points, 0);
+  assert.equal(scores.length, 0, 'a 0-point score sits below the leaderboard\'s 1-point visibility floor, same as any other 0-point score');
+
+  // Confirms this is the points-floor, not the leaver hiddenAt flag: earning
+  // a single point brings them straight back, with no separate "restore
+  // visibility" step required (unlike a leaver, which stays hidden until
+  // restoreLeaderboardVisibilityOnRejoin runs).
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    await db.createBugReport(server.id, 'tester1', { title: 'New bug', description: 'd', priority: 'LOW', status: 'NEW' });
+  });
+  const afterNewPoint = await db.getLeaderboard(server.id);
+  assert.equal(afterNewPoint.length, 1, 'earning a point brings them back immediately');
+  assert.equal(afterNewPoint[0].points, 1);
 });
 
 test('a Tester (no canManageSettings) cannot reset someone\'s score', async () => {

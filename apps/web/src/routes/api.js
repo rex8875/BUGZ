@@ -200,6 +200,21 @@ router.post('/api/servers/:serverId/reports/:reportId/archive', async (req, res)
   }
 });
 
+router.post('/api/servers/:serverId/reports/:reportId/unarchive', async (req, res) => {
+  try {
+    res.json(
+      await updateBugReport({
+        serverId: req.server.id,
+        actingDiscordId: req.session.discordId,
+        bugReportId: req.params.reportId,
+        requestedChanges: { archivedAt: null },
+      }),
+    );
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.get('/api/servers/:serverId/share-links', async (req, res) => {
   if (!req.perms.canShareDashboard) return res.status(403).json({ error: 'Not permitted to share the dashboard here.' });
   res.json(await listShareLinks(req.server.id));

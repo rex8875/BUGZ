@@ -259,40 +259,62 @@ function renderAuditLog(entries) {
     MEMBER_LEFT_DISCORD: 'log-out',
     OWNERSHIP_TRANSFERRED: 'crown',
     POINTS_ADJUSTED: 'trending-up',
+    SCORE_RESET: 'rotate-ccw',
     ROLE_PERMISSIONS_UPDATED: 'shield',
     ROLE_PERMISSIONS_REMOVED: 'shield-off',
     SHARE_LINK_CREATED: 'link',
     SHARE_LINK_REVOKED: 'link-2-off',
   };
-  const ACTION_LABELS = {
-    MEMBER_BANNED: 'banned a member',
-    MEMBER_UNBANNED: 'unbanned a member',
-    MEMBER_LEFT_DISCORD: 'left the Discord server',
-    OWNERSHIP_TRANSFERRED: 'transferred ownership',
-    POINTS_ADJUSTED: 'adjusted leaderboard points',
-    ROLE_PERMISSIONS_UPDATED: 'updated role permissions',
-    ROLE_PERMISSIONS_REMOVED: 'cleared role permissions',
-    SHARE_LINK_CREATED: 'created a share link',
-    SHARE_LINK_REVOKED: 'revoked a share link',
-  };
+
+  // One human sentence per action, built from that action's own details
+  // shape instead of a generic label plus a raw JSON dump. Discord IDs
+  // embedded in details (target/to) are already resolved to usernames by
+  // listAuditLog, with the raw ID as a fallback if that person never
+  // verified. Anything not listed here still renders (falls back to the
+  // raw action name) instead of going blank.
+  function describeAuditEntry(e) {
+    let d = {};
+    try { d = e.details ? JSON.parse(e.details) : {}; } catch { d = {}; }
+    const target = escapeHtml(e.targetUsername || d.target || d.to || 'someone');
+
+    switch (e.action) {
+      case 'MEMBER_BANNED':
+        return `banned ${target}${d.reason ? ` — ${escapeHtml(d.reason)}` : ''}`;
+      case 'MEMBER_UNBANNED':
+        return `unbanned ${target}`;
+      case 'MEMBER_LEFT_DISCORD':
+        return 'left the Discord server';
+      case 'OWNERSHIP_TRANSFERRED':
+        return `transferred ownership to ${target}`;
+      case 'POINTS_ADJUSTED': {
+        const n = Math.abs(d.delta ?? 0);
+        const word = n === 1 ? 'point' : 'points';
+        return d.delta < 0 ? `removed ${n} ${word} from ${target}` : `gave ${target} ${n} ${word}`;
+      }
+      case 'SCORE_RESET':
+        return `reset ${target}'s score`;
+      case 'ROLE_PERMISSIONS_UPDATED':
+        return 'updated role permissions';
+      case 'ROLE_PERMISSIONS_REMOVED':
+        return 'cleared role permissions';
+      case 'SHARE_LINK_CREATED':
+        return `created a ${d.accessLevel === 'DEV' ? 'Dev' : 'View'} share link${d.label ? ` — "${escapeHtml(d.label)}"` : ''}`;
+      case 'SHARE_LINK_REVOKED':
+        return 'revoked a share link';
+      default:
+        return e.action.replace(/_/g, ' ').toLowerCase();
+    }
+  }
 
   list.innerHTML = entries
-    .map((e, i) => {
-      let details = '';
-      try {
-        details = e.details ? ` — ${JSON.stringify(JSON.parse(e.details))}` : '';
-      } catch {
-        details = '';
-      }
-      return `
+    .map((e, i) => `
         <div class="audit-row animate__animated animate__fadeInUp animate__faster" style="animation-delay:${Math.min(i, 12) * 25}ms">
           <div class="audit-row-icon"><i data-lucide="${ACTION_ICONS[e.action] || 'activity'}"></i></div>
           <div class="audit-row-main">
-            <span class="audit-row-actor">${escapeHtml(e.actorDiscordId)}</span> ${escapeHtml(ACTION_LABELS[e.action] || e.action)}${escapeHtml(details)}
+            <span class="audit-row-actor">${escapeHtml(e.actorUsername || e.actorDiscordId)}</span> ${describeAuditEntry(e)}
           </div>
           <div class="hint">${new Date(e.createdAt).toLocaleString()}</div>
-        </div>`;
-    })
+        </div>`)
     .join('');
   if (window.lucide) window.lucide.createIcons();
 }

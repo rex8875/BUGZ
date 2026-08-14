@@ -122,7 +122,14 @@ test('roles.html: renders banned-member/audit-log rows without crashing, and esc
       if (String(url).includes('/audit-log')) {
         return {
           ok: true, status: 200,
-          json: async () => [{ actorDiscordId: '<script>alert(1)</script>', action: 'MEMBER_BANNED', details: null, createdAt: new Date().toISOString() }],
+          json: async () => [{
+            actorDiscordId: '<script>alert(1)</script>',
+            actorUsername: '<script>alert(1)</script>', // unresolved actor: falls back to the raw (still-dangerous) id
+            action: 'MEMBER_BANNED',
+            details: JSON.stringify({ target: '222', reason: '<img src=x onerror=alert(3)>' }),
+            targetUsername: '<img src=x onerror=alert(2)>', // unresolved target: same fallback, new rendering path
+            createdAt: new Date().toISOString(),
+          }],
         };
       }
       return { ok: true, status: 200, json: async () => ({}) };
@@ -132,7 +139,7 @@ test('roles.html: renders banned-member/audit-log rows without crashing, and esc
   const bannedList = doc.getElementById('banned-list');
   const auditList = doc.getElementById('audit-list');
   assert.match(bannedList.textContent, /111/, 'sanity check: the banned row actually rendered');
-  assert.match(auditList.textContent, /banned a member/, 'sanity check: the audit row actually rendered with its human-readable label');
+  assert.match(auditList.textContent, /banned/, 'sanity check: the audit row actually rendered with a human-readable description');
   const dangerousEls = doc.querySelectorAll('#banned-list script, #banned-list img[onerror], #audit-list script, #audit-list img[onerror]');
-  assert.equal(dangerousEls.length, 0, 'ban reason and actor id XSS payloads must never execute');
+  assert.equal(dangerousEls.length, 0, 'ban reason, actor id/username, and target id/username XSS payloads must never execute');
 });

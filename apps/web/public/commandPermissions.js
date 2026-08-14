@@ -48,14 +48,42 @@
     return '#' + color.toString(16).padStart(6, '0');
   }
 
-  function renderCommandPermissions() {
-    if (!cmdPermsData) return;
-
+  function updateSummary() {
     const overriddenCount = Object.keys(cmdPermsData.overrides).length;
     document.getElementById('cmd-perms-summary').textContent =
       overriddenCount === 0
         ? `All ${cmdPermsData.commands.length} commands are using default permissions.`
         : `${overriddenCount} of ${cmdPermsData.commands.length} command${cmdPermsData.commands.length === 1 ? '' : 's'} customized.`;
+  }
+
+  // Updates one row in place (status pill + expanded body) instead of
+  // re-rendering the whole list, which previously re-created and
+  // re-animated every row on every single expand/collapse/save.
+  function refreshRow(cmdName) {
+    const row = document.querySelector(`.cmd-row[data-cmd="${CSS.escape(cmdName)}"]`);
+    if (!row) return;
+    const cmd = cmdPermsData.commands.find((c) => c.name === cmdName);
+    const override = cmdPermsData.overrides[cmdName] || [];
+    const isExpanded = expandedCommand === cmdName;
+
+    row.classList.toggle('has-override', override.length > 0);
+    row.classList.toggle('expanded', isExpanded);
+    row.querySelector('.cmd-row-status').outerHTML =
+      override.length > 0
+        ? `<span class="cmd-row-status restricted">Restricted to ${override.length} role${override.length === 1 ? '' : 's'}</span>`
+        : `<span class="cmd-row-status default">Default</span>`;
+    row.querySelector('.cmd-row-body').innerHTML = isExpanded
+      ? `<div class="animate__animated animate__fadeIn animate__faster">${commandBodyHtml(cmd, override)}</div>`
+      : '';
+
+    if (window.lucide) window.lucide.createIcons();
+    if (isExpanded) wireExpandedCommandControls(cmdName);
+    updateSummary();
+  }
+
+  function renderCommandPermissions() {
+    if (!cmdPermsData) return;
+    updateSummary();
 
     const filtered = cmdPermsData.commands.filter(
       (c) => c.name.toLowerCase().includes(searchQuery) || c.description.toLowerCase().includes(searchQuery),
@@ -95,6 +123,7 @@
     list.querySelectorAll('[data-toggle]').forEach((el) => {
       el.addEventListener('click', () => {
         const cmdName = el.dataset.toggle;
+        const previouslyExpanded = expandedCommand;
         if (expandedCommand === cmdName) {
           expandedCommand = null;
           pendingSelection = null;
@@ -102,7 +131,10 @@
           expandedCommand = cmdName;
           pendingSelection = new Set(cmdPermsData.overrides[cmdName] || []);
         }
-        renderCommandPermissions();
+        // Collapse whichever other row was open (only one at a time) without
+        // touching the rest of the list, then update the clicked row.
+        if (previouslyExpanded && previouslyExpanded !== cmdName) refreshRow(previouslyExpanded);
+        refreshRow(cmdName);
       });
     });
 
@@ -111,7 +143,7 @@
 
   function commandBodyHtml(cmd, currentOverride) {
     if (cmdPermsData.roles.length === 0) {
-      return '<div class="cmd-no-roles-hint">This server has no custom Discord roles to choose from yet.</div>';
+      return '<div class="cmd-no-roles-hint">No custom Discord roles yet.</div>';
     }
 
     const rolesHtml = cmdPermsData.roles
@@ -170,7 +202,7 @@
       setTimeout(() => {
         expandedCommand = null;
         pendingSelection = null;
-        renderCommandPermissions();
+        refreshRow(cmdName);
       }, 420);
     } catch (err) {
       const errEl = document.getElementById(`cmd-perms-error-${cmdName}`);

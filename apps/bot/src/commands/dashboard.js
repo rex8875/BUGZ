@@ -12,7 +12,7 @@ module.exports = {
 
     const url = `${process.env.WEB_BASE_URL}/dashboard/${server.id}`;
     await interaction.reply({
-      content: `Here's your dashboard link: ${url}\n(You'll be asked to verify with Discord first if you haven't already — and you'll only see this server here if your role has dashboard access.)`,
+      content: `Here's your dashboard link: ${url}\nYou'll need to verify with Discord the first time you open it.`,
       ephemeral: true,
     });
   },

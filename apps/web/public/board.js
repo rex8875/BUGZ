@@ -271,10 +271,16 @@ function quickActionsHtml(report) {
   return `
     <div class="quick-actions" data-report-id="${report.id}">
       <select class="priority-select">${priorityOptions}</select>
-      <select class="status-select">${statusOptions}</select>
+      <select class="status-select" ${report.archivedAt ? 'disabled title="Status is locked while archived — unarchive first"' : ''}>${statusOptions}</select>
       ${state.permissions.canPingTesters ? `<button data-action="ping">Ping testers</button>` : ''}
       ${state.permissions.canPingTesters ? `<button data-action="retest">Post in retested</button>` : ''}
-      ${state.permissions.canArchive ? `<button data-action="archive" ${canArchiveNow ? '' : 'disabled'}>Archive</button>` : ''}
+      ${
+        state.permissions.canArchive
+          ? report.archivedAt
+            ? `<button data-action="unarchive">Unarchive</button>`
+            : `<button data-action="archive" ${canArchiveNow ? '' : 'disabled'}>Archive</button>`
+          : ''
+      }
     </div>`;
 }
 
@@ -290,7 +296,7 @@ function renderList() {
       const selected = r.id === state.selectedId;
       const expanded = r.id === state.expandedId;
       return `
-        <div class="report-row animate__animated animate__fadeInUp animate__faster ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''}" data-report-id="${r.id}" style="animation-delay:${Math.min(i, 12) * 35}ms">
+        <div class="report-row report-row-priority-${r.priority} animate__animated animate__fadeInUp animate__faster ${selected ? 'selected' : ''} ${expanded ? 'expanded' : ''}" data-report-id="${r.id}" style="animation-delay:${Math.min(i, 12) * 35}ms">
           <div class="title">${escapeHtml(r.title)}</div>
           ${priorityStatusTagsHtml(r)}
           ${selected ? quickActionsHtml(r) : ''}
@@ -358,11 +364,20 @@ function detailPanelHtml(report) {
   return `
     <div class="detail-panel animate__animated animate__fadeInDown animate__faster" data-report-id="${report.id}">
       <button class="detail-close" data-close-detail title="Close" aria-label="Close detail view"><i data-lucide="x"></i></button>
-      <h2>${escapeHtml(report.title)} ${state.permissions.canEditReports ? '<button data-edit-title><i data-lucide="pencil"></i> Edit title</button>' : ''}</h2>
+      <h2 class="detail-title-row">
+        <span class="detail-title-text" data-title-text>${escapeHtml(report.title)}</span>
+        ${state.permissions.canEditReports ? '<button data-edit-title><i data-lucide="pencil"></i> Edit title</button>' : ''}
+      </h2>
       <div class="detail-meta"><i data-lucide="user"></i> reported by ${escapeHtml(report.reporter?.discordUsername || 'unknown')} · ${escapeHtml(report.device || 'unspecified device')} · ${new Date(report.createdAt).toLocaleDateString()}</div>
       <div class="detail-tags">${priorityStatusTagsHtml(report)}</div>
 
-      <div class="detail-row"><div class="label">Description</div><div>${escapeHtml(report.description)} ${state.permissions.canEditReports ? '<button data-edit-description><i data-lucide="pencil"></i> Edit</button>' : ''}</div></div>
+      <div class="detail-row">
+        <div class="label">Description</div>
+        <div class="detail-desc-row">
+          <span class="detail-desc-text" data-desc-text>${escapeHtml(report.description)}</span>
+          ${state.permissions.canEditReports ? '<button data-edit-description><i data-lucide="pencil"></i> Edit</button>' : ''}
+        </div>
+      </div>
       ${report.stepsToReproduce ? `<div class="detail-row"><div class="label">Steps</div><div>${escapeHtml(report.stepsToReproduce)}</div></div>` : ''}
       <div class="detail-row"><div class="label">Evidence</div><div>${evidenceLinkHtml(report.evidenceFileUrl, report.evidenceLink)}</div></div>
       <div class="detail-row"><div class="label">F9</div><div>${evidenceLinkHtml(report.f9FileUrl, report.f9Link)}</div></div>
@@ -370,9 +385,57 @@ function detailPanelHtml(report) {
 
       ${quickActionsHtml(report)}
       ${state.permissions.canPingTesters ? `<div class="posts-to">Posts to channel ${state.retestChannelId ? escapeHtml(state.retestChannelId) : '(not set — see Settings)'}</div>` : ''}
-      ${state.permissions.canArchive ? `<div class="hint">Archive enables once status is Fixed, Not a bug, Duplicate, or Won't fix</div>` : ''}
+      ${state.permissions.canArchive && !report.archivedAt ? `<div class="hint">Archive enables once status is Fixed, Not a bug, Duplicate, or Won't fix</div>` : ''}
       ${state.permissions.canDeleteReports ? `<div style="margin-top:12px;"><button data-delete-report><i data-lucide="trash-2"></i> Delete permanently</button></div>` : ''}
     </div>`;
+}
+
+// Turns a title/description into an in-place text field instead of a
+// popup dialog. Escape cancels; Enter saves (Ctrl/Cmd+Enter for
+// multiline, so plain Enter can still insert a newline); clicking away
+// also saves, same as most inline-edit UIs.
+function startInlineEdit({ textEl, currentValue, onSave, multiline = false }) {
+  const field = document.createElement(multiline ? 'textarea' : 'input');
+  if (!multiline) field.type = 'text';
+  else field.rows = 3;
+  field.className = 'inline-edit-field';
+  field.value = currentValue;
+
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    if (save) {
+      const next = field.value.trim();
+      if (next && next !== currentValue) {
+        field.disabled = true;
+        try {
+          await onSave(next);
+        } catch {
+          done = false;
+          field.disabled = false;
+          field.focus();
+          return;
+        }
+      }
+    }
+    field.replaceWith(textEl);
+  };
+
+  field.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      finish(false);
+    } else if (e.key === 'Enter' && (!multiline || e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      finish(true);
+    }
+  });
+  field.addEventListener('blur', () => finish(true));
+
+  textEl.replaceWith(field);
+  field.focus();
+  if (!multiline) field.select();
 }
 
 function bindDetailPanelEvents() {
@@ -382,9 +445,11 @@ function bindDetailPanelEvents() {
   const report = state.reports.find((r) => r.id === reportId);
   if (!report) return;
 
-  panel.querySelectorAll('.priority-select').forEach((sel) => sel.addEventListener('change', () => updateReport(report.id, { priority: sel.value })));
-  panel.querySelectorAll('.status-select').forEach((sel) => sel.addEventListener('change', () => updateReport(report.id, { status: sel.value })));
-  panel.querySelectorAll('[data-action]').forEach((btn) => btn.addEventListener('click', () => runAction(report.id, btn.dataset.action)));
+  // Note: .priority-select, .status-select, and [data-action] inside this
+  // panel are NOT bound here — the general loop in renderList() already
+  // covers every element of those kinds in #report-list, and the detail
+  // panel is a descendant of it. Binding them again here was firing every
+  // one of those twice per click/change.
 
   panel.querySelector('[data-close-detail]').addEventListener('click', () => {
     state.expandedId = null;
@@ -393,23 +458,30 @@ function bindDetailPanelEvents() {
 
   const editTitleBtn = panel.querySelector('[data-edit-title]');
   if (editTitleBtn) {
-    editTitleBtn.addEventListener('click', async () => {
-      const next = await promptDialog({ title: 'New title', initialValue: report.title });
-      if (next && next.trim()) {
-        await updateReport(report.id, { title: next.trim() });
-        showToast('success', 'Title updated');
-      }
+    editTitleBtn.addEventListener('click', () => {
+      startInlineEdit({
+        textEl: panel.querySelector('[data-title-text]'),
+        currentValue: report.title,
+        onSave: async (next) => {
+          await updateReport(report.id, { title: next });
+          showToast('success', 'Title updated');
+        },
+      });
     });
   }
 
   const editDescBtn = panel.querySelector('[data-edit-description]');
   if (editDescBtn) {
-    editDescBtn.addEventListener('click', async () => {
-      const next = await promptDialog({ title: 'New description', initialValue: report.description });
-      if (next && next.trim()) {
-        await updateReport(report.id, { description: next.trim() });
-        showToast('success', 'Description updated');
-      }
+    editDescBtn.addEventListener('click', () => {
+      startInlineEdit({
+        textEl: panel.querySelector('[data-desc-text]'),
+        currentValue: report.description,
+        multiline: true,
+        onSave: async (next) => {
+          await updateReport(report.id, { description: next });
+          showToast('success', 'Description updated');
+        },
+      });
     });
   }
 
@@ -437,10 +509,30 @@ function bindDetailPanelEvents() {
   }
 }
 
+// Swaps an updated report into state.reports, unless it no longer matches
+// the current filter (e.g. archiving it while viewing Active, unarchiving
+// while viewing Archived, or changing status away from the status tab
+// currently selected) — in which case it's removed from view instead of
+// lingering with stale data until the next full reload.
+function reconcileUpdatedReport(updated) {
+  const stillMatchesFilter =
+    (state.filter.archived ? !!updated.archivedAt : !updated.archivedAt) &&
+    (!state.filter.status || updated.status === state.filter.status) &&
+    (!state.filter.priority || updated.priority === state.filter.priority);
+
+  if (stillMatchesFilter) {
+    state.reports = state.reports.map((r) => (r.id === updated.id ? updated : r));
+  } else {
+    state.reports = state.reports.filter((r) => r.id !== updated.id);
+    if (state.selectedId === updated.id) state.selectedId = null;
+    if (state.expandedId === updated.id) state.expandedId = null;
+  }
+}
+
 async function updateReport(id, data) {
   try {
     const updated = await api(`/api/servers/${serverId}/reports/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
-    state.reports = state.reports.map((r) => (r.id === id ? updated : r));
+    reconcileUpdatedReport(updated);
     renderList();
     if (data.status) loadSummary();
   } catch (err) {
@@ -448,14 +540,14 @@ async function updateReport(id, data) {
   }
 }
 
-const ACTION_TOAST = { ping: 'Testers pinged', retest: 'Posted to retest channel', archive: 'Report archived' };
+const ACTION_TOAST = { ping: 'Testers pinged', retest: 'Posted to retest channel', archive: 'Report archived', unarchive: 'Report unarchived' };
 
 async function runAction(id, action) {
   try {
     const updated = await api(`/api/servers/${serverId}/reports/${id}/${action}`, { method: 'POST' });
-    state.reports = state.reports.map((r) => (r.id === id ? updated : r));
+    reconcileUpdatedReport(updated);
     renderList();
-    if (action === 'archive') loadSummary();
+    if (action === 'archive' || action === 'unarchive') loadSummary();
     if (ACTION_TOAST[action]) showToast('success', ACTION_TOAST[action]);
   } catch (err) {
     showError(err.message);
@@ -694,6 +786,7 @@ const SEARCH_TOKEN_HELP = {
   by: 'Reports from a specific person',
   device: 'Filter by device',
 };
+const SEARCH_TOKEN_EXAMPLE = { before: 'date', on: 'date', after: 'date', by: 'username', device: 'PC' };
 const DEVICE_VALUES = ['PC', 'Mobile', 'Tablet', 'Console'];
 const DATE_KEYS = ['before', 'on', 'after'];
 let suggestIndex = -1;
@@ -743,8 +836,8 @@ function suggestionItemsFor(token) {
     const prefix = token.text.toLowerCase();
     return SEARCH_TOKEN_KEYS.filter((k) => k.startsWith(prefix)).map((k) => ({
       icon: DATE_KEYS.includes(k) ? 'calendar' : k === 'by' ? 'user' : 'monitor-smartphone',
-      label: `${k}:`,
-      hint: SEARCH_TOKEN_HELP[k],
+      label: SEARCH_TOKEN_HELP[k],
+      sub: `${k}: ${SEARCH_TOKEN_EXAMPLE[k]}`,
       apply: () => replaceToken(token, `${k}:`),
     }));
   }
@@ -754,7 +847,23 @@ function suggestionItemsFor(token) {
   if (!SEARCH_TOKEN_KEYS.includes(key)) return [];
 
   if (DATE_KEYS.includes(key)) {
-    return [{ icon: 'calendar', label: 'Pick a date…', hint: 'Opens a calendar', apply: () => { datePickerToken = token; const fp = ensureDatePicker(); if (fp) fp.open(); } }];
+    return [{
+      icon: 'calendar', label: 'Pick a date…', sub: 'Opens a calendar',
+      apply: () => {
+        datePickerToken = token;
+        // Deferred a tick: opening synchronously here races Flatpickr's own
+        // document-level "click outside closes the calendar" listener. This
+        // apply() runs from a mousedown on a suggestion item, and that same
+        // mousedown keeps bubbling up to document right after we open —
+        // since the click target isn't the calendar or its input, Flatpickr
+        // immediately closes what it just opened. Pushing the open() call
+        // to the next tick lets the original mousedown finish bubbling
+        // first. (Tabbing to the hidden anchor input worked around this
+        // before, since a focus event doesn't bubble through this same
+        // mousedown chain.)
+        setTimeout(() => { const fp = ensureDatePicker(); if (fp) fp.open(); }, 0);
+      },
+    }];
   }
   if (key === 'device') {
     return DEVICE_VALUES.filter((d) => d.toLowerCase().includes(partial)).map((d) => ({
@@ -773,23 +882,31 @@ function suggestionItemsFor(token) {
 
 function updateSuggestions() {
   const token = getCurrentToken(searchInputEl.value, searchInputEl.selectionStart);
-  const items = token.text.length > 0 ? suggestionItemsFor(token) : [];
+  const items = suggestionItemsFor(token);
   const box = document.getElementById('search-suggest');
   if (items.length === 0) {
     hideSuggestions();
     return;
   }
   suggestIndex = -1;
-  box.innerHTML = items
-    .map(
-      (item, i) => `
+  // The full key list (no ":" typed yet) gets a "Filters" header, same as
+  // the rest of that menu — narrowing to one key's specific options (a
+  // date, a device, a username) doesn't need it.
+  const showHeader = !token.text.includes(':');
+  box.innerHTML =
+    (showHeader ? '<div class="search-suggest-header">Filters</div>' : '') +
+    items
+      .map(
+        (item, i) => `
       <div class="search-suggest-item" data-idx="${i}">
         <i data-lucide="${item.icon}"></i>
-        <span class="search-suggest-label">${escapeHtml(item.label)}</span>
-        ${item.hint ? `<span class="search-suggest-hint">${escapeHtml(item.hint)}</span>` : ''}
+        <div class="search-suggest-text">
+          <span class="search-suggest-label">${escapeHtml(item.label)}</span>
+          ${item.sub ? `<span class="search-suggest-sub">${escapeHtml(item.sub)}</span>` : ''}
+        </div>
       </div>`,
-    )
-    .join('');
+      )
+      .join('');
   box.style.display = 'block';
   if (window.lucide) window.lucide.createIcons();
   box.querySelectorAll('.search-suggest-item').forEach((el, i) => {

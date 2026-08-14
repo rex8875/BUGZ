@@ -40,7 +40,7 @@ module.exports = {
         },
       });
       await interaction.reply({
-        content: `Done — anyone with the ${role} role now has full access to every command and permission, checked live against Discord. This isn't a separate bot role; it's tied directly to that Discord role, so removing the role there removes access immediately.`,
+        content: `Done — anyone with the ${role} role now has full access to every command and permission.`,
         ephemeral: true,
       });
     } catch (err) {

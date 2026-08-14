@@ -18,7 +18,7 @@
     <section>
       <h2><i data-lucide="users"></i> Roles</h2>
       <div class="cmd-perms-intro">
-        Bot permissions are linked directly to this server's own Discord roles — there's no separate role to create here. Pick one of your existing Discord roles below and choose what it can do. Anyone holding that role gets these permissions immediately, checked live against Discord; remove the role from them in Discord and access is gone just as fast.
+        Pick a role below and set what it can do.
       </div>
       <div id="role-perms-summary" class="cmd-perms-summary"></div>
       <input type="text" id="role-search" class="search-input" placeholder="Search your server's roles…" style="margin-bottom:12px;" />
@@ -28,7 +28,7 @@
     <section style="margin-top:28px;">
       <h2><i data-lucide="sliders-horizontal"></i> Command Permissions</h2>
       <div class="cmd-perms-intro">
-        By default, every command follows this server's normal role permissions above. You only need to touch anything here if you want a <em>specific command</em> restricted to <em>specific Discord roles</em> — like Dyno's per-command role restrictions — regardless of someone's normal permissions.
+        Commands follow the role permissions above by default. Use this only if you want a specific command locked to specific roles, regardless of who normally has access.
       </div>
       <div id="cmd-perms-summary" class="cmd-perms-summary"></div>
       <input type="text" id="cmd-perms-search" class="search-input" placeholder="Search commands…" style="margin-bottom:12px;" />
@@ -38,7 +38,7 @@
     <section style="margin-top:28px;">
       <h2><i data-lucide="ban"></i> Ban</h2>
       <div class="hint" style="margin-bottom:10px;">
-        Real membership lives in Discord itself — check your server's own member list there for who's actually in the server. Use this to block someone from the bug tracker specifically, regardless of what Discord role they hold.
+        Blocks someone from the bug tracker only, regardless of their Discord role — this isn't a Discord ban, so check Discord itself for actual server membership.
       </div>
       <div class="detail-panel" style="margin-bottom:10px;">
         <div class="field-group">

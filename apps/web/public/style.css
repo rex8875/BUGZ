@@ -320,6 +320,32 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
 .pill-dot-priority-HIGH { background: var(--high); }
 .pill-dot-priority-CRITICAL { background: var(--critical); }
 
+/* Give the status/priority pills a little of their own color instead of
+   uniform grey — a soft tinted border at rest, the full tag-style
+   treatment once selected (reuses the exact colors the dots and tag
+   badges already use, so it all reads as one system). */
+.filter-pill[data-status="NEW"] { border-color: color-mix(in srgb, var(--status-new) 45%, var(--line)); }
+.filter-pill[data-status="NEEDS_INFO"] { border-color: color-mix(in srgb, var(--status-info) 45%, var(--line)); }
+.filter-pill[data-status="FIXED"] { border-color: color-mix(in srgb, var(--status-fixed) 45%, var(--line)); }
+.filter-pill[data-status="NOT_A_BUG"],
+.filter-pill[data-status="DUPLICATE"],
+.filter-pill[data-status="WONT_FIX"] { border-color: color-mix(in srgb, var(--status-closed) 45%, var(--line)); }
+.filter-pill[data-priority="LOW"] { border-color: color-mix(in srgb, var(--low) 45%, var(--line)); }
+.filter-pill[data-priority="MEDIUM"] { border-color: color-mix(in srgb, var(--medium) 45%, var(--line)); }
+.filter-pill[data-priority="HIGH"] { border-color: color-mix(in srgb, var(--high) 45%, var(--line)); }
+.filter-pill[data-priority="CRITICAL"] { border-color: color-mix(in srgb, var(--critical) 45%, var(--line)); }
+
+.filter-pill[data-status="NEW"].active { background: var(--status-new-dim); color: var(--status-new); border-color: var(--status-new); }
+.filter-pill[data-status="NEEDS_INFO"].active { background: var(--status-info-dim); color: var(--status-info); border-color: var(--status-info); }
+.filter-pill[data-status="FIXED"].active { background: var(--status-fixed-dim); color: var(--status-fixed); border-color: var(--status-fixed); }
+.filter-pill[data-status="NOT_A_BUG"].active,
+.filter-pill[data-status="DUPLICATE"].active,
+.filter-pill[data-status="WONT_FIX"].active { background: var(--status-closed-dim); color: var(--status-closed); border-color: var(--status-closed); }
+.filter-pill[data-priority="LOW"].active { background: var(--low-dim); color: var(--low); border-color: var(--low); }
+.filter-pill[data-priority="MEDIUM"].active { background: var(--medium-dim); color: var(--medium); border-color: var(--medium); }
+.filter-pill[data-priority="HIGH"].active { background: var(--high-dim); color: var(--high); border-color: var(--high); }
+.filter-pill[data-priority="CRITICAL"].active { background: var(--critical-dim); color: var(--critical); border-color: var(--critical); }
+
 .report-list { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
 
 /* ---- specimen-tag report card: the signature element ---- */
@@ -350,6 +376,13 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
 .report-row.selected { border-color: var(--amber); box-shadow: var(--shadow-md), 0 0 0 1px var(--amber); }
 .report-row.expanded { border-color: var(--amber); box-shadow: var(--shadow-md), 0 0 0 1px var(--amber); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .report-row .title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+
+/* the colored edge for priority, promised by this file's own header
+   comment but never actually wired up until now */
+.report-row.report-row-priority-LOW { border-left: 3px solid var(--low); }
+.report-row.report-row-priority-MEDIUM { border-left: 3px solid var(--medium); }
+.report-row.report-row-priority-HIGH { border-left: 3px solid var(--high); }
+.report-row.report-row-priority-CRITICAL { border-left: 3px solid var(--critical); }
 
 .tag-row { display: flex; gap: 6px; flex-wrap: wrap; }
 
@@ -962,8 +995,18 @@ section h2 { font-family: var(--font-display); font-size: 16px; color: var(--tex
 .search-suggest-item svg { width: 15px; height: 15px; color: var(--text-dim); flex-shrink: 0; }
 .search-suggest-item.active, .search-suggest-item:hover { background: var(--amber-dim); }
 .search-suggest-item.active svg, .search-suggest-item:hover svg { color: var(--amber-bright); }
-.search-suggest-label { font-family: var(--font-mono); font-weight: 600; }
-.search-suggest-hint { color: var(--text-dim); font-size: 12px; margin-left: auto; padding-left: 10px; }
+.search-suggest-header {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 10px 14px 4px;
+}
+.search-suggest-text { display: flex; flex-direction: column; gap: 1px; }
+.search-suggest-label { font-weight: 600; }
+.search-suggest-sub { color: var(--text-dim); font-size: 11.5px; font-family: var(--font-mono); }
 
 /* Re-theme Flatpickr's default light popup to match the app's dark
    "field log" palette instead of shipping its stock white calendar. */
