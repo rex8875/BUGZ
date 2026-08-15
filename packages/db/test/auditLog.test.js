@@ -61,3 +61,40 @@ test('routine bug-report status/priority edits are deliberately NOT logged — o
     assert.equal(log.filter((e) => e.action.startsWith('REPORT_')).length, 0);
   });
 });
+
+test('deleting a report is logged with its title — this had no audit trail at all before', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServer(db);
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
+
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    const report = await db.createBugReport(server.id, 'tester1', { title: 'A very specific title', description: 'd', priority: 'LOW', status: 'NEW' });
+    await db.deleteBugReport({ serverId: server.id, actingDiscordId: 'owner1', bugReportId: report.id });
+
+    const log = await db.listAuditLog(server.id);
+    const entry = log.find((e) => e.action === 'REPORT_DELETED');
+    assert.ok(entry, 'deletion should be logged');
+    assert.equal(entry.actorUsername, 'Owner');
+    assert.equal(JSON.parse(entry.details).title, 'A very specific title');
+  });
+});
+
+test('archiving and unarchiving a report are each logged with its title', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const { server } = await setupServer(db);
+  await db.setRolePermissions({ serverId: server.id, actingDiscordId: 'owner1', discordRoleId: TESTER_ROLE, permissions: { canSubmitBugs: true } });
+
+  await withDiscordRoles({ tester1: [TESTER_ROLE] }, async () => {
+    const report = await db.createBugReport(server.id, 'tester1', { title: 'Archive me', description: 'd', priority: 'LOW', status: 'NEW' });
+    await db.updateBugReport({ serverId: server.id, actingDiscordId: 'owner1', bugReportId: report.id, requestedChanges: { status: 'FIXED' } });
+    await db.updateBugReport({ serverId: server.id, actingDiscordId: 'owner1', bugReportId: report.id, requestedChanges: { archivedAt: new Date() } });
+    await db.updateBugReport({ serverId: server.id, actingDiscordId: 'owner1', bugReportId: report.id, requestedChanges: { archivedAt: null } });
+
+    const log = await db.listAuditLog(server.id);
+    const archived = log.find((e) => e.action === 'REPORT_ARCHIVED');
+    const unarchived = log.find((e) => e.action === 'REPORT_UNARCHIVED');
+    assert.ok(archived && unarchived, 'both directions should be logged separately');
+    assert.equal(JSON.parse(archived.details).title, 'Archive me');
+    assert.equal(JSON.parse(unarchived.details).title, 'Archive me');
+  });
+});

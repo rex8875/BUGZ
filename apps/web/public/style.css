@@ -1097,7 +1097,113 @@ section h2 { font-family: var(--font-display); font-size: 16px; color: var(--tex
   border: 1px solid var(--line-bright) !important;
   box-shadow: var(--shadow-md) !important;
 }
-.swal2-toast .swal2-title { font-size: 13px !important; font-family: var(--font-body) !important; font-weight: 600 !important; }
+/* ---- dashboard-wide background themes — a personal choice, separate
+   from a specific server's own custom gradient (which still layers on
+   top of whichever theme is active, only on that server's own board
+   page — see applyServerBackground() in board.js). Stored client-side
+   since this is a per-person cosmetic preference, not a team setting.
+   See theme.js. "Ink" is the existing default body background above;
+   it doesn't need its own override here. ---- */
+
+body.theme-aurora {
+  background:
+    radial-gradient(ellipse 800px 500px at 15% -10%, rgba(94, 84, 242, 0.35), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 85% 0%, rgba(45, 212, 191, 0.28), transparent 60%),
+    radial-gradient(ellipse 900px 600px at 50% 100%, rgba(217, 119, 6, 0.14), transparent 65%),
+    var(--ink);
+  background-attachment: fixed;
+}
+
+body.theme-mesh {
+  background:
+    radial-gradient(circle at 20% 20%, rgba(217, 119, 6, 0.22), transparent 40%),
+    radial-gradient(circle at 80% 15%, rgba(124, 58, 237, 0.2), transparent 42%),
+    radial-gradient(circle at 15% 80%, rgba(20, 184, 166, 0.18), transparent 45%),
+    radial-gradient(circle at 85% 85%, rgba(217, 119, 6, 0.14), transparent 40%),
+    var(--ink);
+  background-attachment: fixed;
+}
+
+body.theme-cyber {
+  background:
+    radial-gradient(ellipse 600px 300px at 50% 0%, rgba(56, 232, 225, 0.12), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(56, 232, 225, 0.05) 0px, rgba(56, 232, 225, 0.05) 1px, transparent 1px, transparent 36px),
+    repeating-linear-gradient(90deg, rgba(56, 232, 225, 0.05) 0px, rgba(56, 232, 225, 0.05) 1px, transparent 1px, transparent 36px),
+    #06070b;
+}
+
+body.theme-duotone {
+  background: linear-gradient(160deg, #0d1b2a 0%, #10131a 55%, #1a1310 100%);
+  background-attachment: fixed;
+}
+
+/* Glassmorphism: a vibrant fixed backdrop, with every card's own
+   background swapped for a translucent version via the SAME --ink-card
+   / --ink-raised variables those cards already use — so this cascades
+   to every card in the app automatically. backdrop-filter itself can't
+   ride along on a variable, so those selectors are listed explicitly. */
+body.theme-glass {
+  background:
+    radial-gradient(ellipse 900px 700px at 20% 0%, rgba(217, 119, 6, 0.45), transparent 55%),
+    radial-gradient(ellipse 900px 700px at 90% 30%, rgba(124, 58, 237, 0.4), transparent 55%),
+    radial-gradient(ellipse 800px 800px at 50% 100%, rgba(20, 184, 166, 0.3), transparent 55%),
+    #0c0e14;
+  background-attachment: fixed;
+  --ink-card: rgba(26, 32, 44, 0.55);
+  --ink-raised: rgba(22, 27, 37, 0.6);
+}
+body.theme-glass .report-row,
+body.theme-glass .detail-panel,
+body.theme-glass .server-card,
+body.theme-glass section,
+body.theme-glass .modal-box,
+body.theme-glass .cmd-row,
+body.theme-glass .banned-row,
+body.theme-glass .audit-row,
+body.theme-glass .lb-row,
+body.theme-glass .lb-podium-card {
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+
+/* ---- theme picker popover (see theme.js) ---- */
+.theme-picker-btn {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--ink-card); border: 1px solid var(--line);
+  color: var(--text-dim); display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.theme-picker-btn:hover { color: var(--amber-bright); border-color: var(--line-bright); }
+.theme-picker-popover {
+  position: fixed;
+  background: var(--ink-card);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 12px;
+  z-index: 90;
+  display: none;
+  width: 220px;
+}
+.theme-picker-popover.open { display: block; }
+.theme-picker-title { font-family: var(--font-mono); font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); margin: 0 0 8px; padding: 0 2px; }
+.theme-swatch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.theme-swatch {
+  height: 44px; border-radius: 8px; border: 2px solid transparent;
+  cursor: pointer; position: relative; overflow: hidden;
+}
+.theme-swatch.active { border-color: var(--amber); }
+.theme-swatch.active::after {
+  content: '✓'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 13px; font-weight: 700; text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+}
+.theme-swatch-label { font-size: 9.5px; text-align: center; margin-top: 3px; color: var(--text-faint); }
+.theme-swatch-ink { background: linear-gradient(160deg, #161b25, #10131a); }
+.theme-swatch-aurora { background: radial-gradient(circle at 30% 20%, #5e54f2, transparent 60%), radial-gradient(circle at 80% 10%, #2dd4bf, transparent 60%), #10131a; }
+.theme-swatch-mesh { background: radial-gradient(circle at 20% 20%, #d97706, transparent 45%), radial-gradient(circle at 80% 80%, #7c3aed, transparent 45%), #10131a; }
+.theme-swatch-cyber { background: linear-gradient(160deg, #06070b, #0a1414); border-top: 1px solid rgba(56,232,225,0.3); }
+.theme-swatch-duotone { background: linear-gradient(160deg, #0d1b2a, #1a1310); }
+.theme-swatch-glass { background: radial-gradient(circle at 30% 20%, #d97706, transparent 55%), radial-gradient(circle at 80% 80%, #7c3aed, transparent 55%), #0c0e14; }
 
 /* ---- custom confirm modal — replaces the SweetAlert2 confirm(),
    see board.js confirmModal() for why ---- */

@@ -19,6 +19,8 @@ let discordRoles = [];
 let configuredByRoleId = {}; // discordRoleId -> RolePermission row
 let roleSearchQuery = '';
 let expandedRoleId = null;
+let auditEntries = [];
+let auditSearchQuery = '';
 
 async function api(path, options = {}) {
   const res = await fetch(path, { ...options, headers: { 'Content-Type': 'application/json', ...options.headers } });
@@ -245,81 +247,116 @@ function renderBanned(banned) {
   });
 }
 
+const AUDIT_ACTION_ICONS = {
+  MEMBER_BANNED: 'user-x',
+  MEMBER_UNBANNED: 'user-check',
+  MEMBER_LEFT_DISCORD: 'log-out',
+  OWNERSHIP_TRANSFERRED: 'crown',
+  POINTS_ADJUSTED: 'trending-up',
+  SCORE_RESET: 'rotate-ccw',
+  ROLE_PERMISSIONS_UPDATED: 'shield',
+  ROLE_PERMISSIONS_REMOVED: 'shield-off',
+  SHARE_LINK_CREATED: 'link',
+  SHARE_LINK_REVOKED: 'link-2-off',
+  REPORT_DELETED: 'trash-2',
+  REPORT_ARCHIVED: 'archive',
+  REPORT_UNARCHIVED: 'archive-restore',
+};
+
+// One human sentence per action, built from that action's own details
+// shape instead of a generic label plus a raw JSON dump. Discord IDs
+// embedded in details (target/to) are already resolved to usernames by
+// listAuditLog, with the raw ID as a fallback if that person never
+// verified. Anything not listed here still renders (falls back to the
+// raw action name) instead of going blank.
+function describeAuditEntry(e) {
+  let d = {};
+  try { d = e.details ? JSON.parse(e.details) : {}; } catch { d = {}; }
+  const target = escapeHtml(e.targetUsername || d.target || d.to || 'someone');
+
+  switch (e.action) {
+    case 'MEMBER_BANNED':
+      return `banned ${target}${d.reason ? ` — ${escapeHtml(d.reason)}` : ''}`;
+    case 'MEMBER_UNBANNED':
+      return `unbanned ${target}`;
+    case 'MEMBER_LEFT_DISCORD':
+      return 'left the Discord server';
+    case 'OWNERSHIP_TRANSFERRED':
+      return `transferred ownership to ${target}`;
+    case 'POINTS_ADJUSTED': {
+      const n = Math.abs(d.delta ?? 0);
+      const word = n === 1 ? 'point' : 'points';
+      return d.delta < 0 ? `removed ${n} ${word} from ${target}` : `gave ${target} ${n} ${word}`;
+    }
+    case 'SCORE_RESET':
+      return `reset ${target}'s score`;
+    case 'REPORT_DELETED':
+      return `deleted the report "${escapeHtml(d.title || 'untitled')}"`;
+    case 'REPORT_ARCHIVED':
+      return `archived the report "${escapeHtml(d.title || 'untitled')}"`;
+    case 'REPORT_UNARCHIVED':
+      return `unarchived the report "${escapeHtml(d.title || 'untitled')}"`;
+    case 'ROLE_PERMISSIONS_UPDATED':
+      return 'updated role permissions';
+    case 'ROLE_PERMISSIONS_REMOVED':
+      return 'cleared role permissions';
+    case 'SHARE_LINK_CREATED':
+      return `created a ${d.accessLevel === 'DEV' ? 'Dev' : 'View'} share link${d.label ? ` — "${escapeHtml(d.label)}"` : ''}`;
+    case 'SHARE_LINK_REVOKED':
+      return 'revoked a share link';
+    default:
+      return e.action.replace(/_/g, ' ').toLowerCase();
+  }
+}
+
 function renderAuditLog(entries) {
+  auditEntries = entries;
+  applyAuditFilter();
+}
+
+function applyAuditFilter() {
   const list = document.getElementById('audit-list');
-  if (entries.length === 0) {
+
+  if (auditEntries.length === 0) {
     list.innerHTML = '<div class="hint empty-state"><i data-lucide="scroll-text"></i> No actions logged yet.</div>';
     if (window.lucide) window.lucide.createIcons();
     return;
   }
 
-  const ACTION_ICONS = {
-    MEMBER_BANNED: 'user-x',
-    MEMBER_UNBANNED: 'user-check',
-    MEMBER_LEFT_DISCORD: 'log-out',
-    OWNERSHIP_TRANSFERRED: 'crown',
-    POINTS_ADJUSTED: 'trending-up',
-    SCORE_RESET: 'rotate-ccw',
-    ROLE_PERMISSIONS_UPDATED: 'shield',
-    ROLE_PERMISSIONS_REMOVED: 'shield-off',
-    SHARE_LINK_CREATED: 'link',
-    SHARE_LINK_REVOKED: 'link-2-off',
-    REPORT_DELETED: 'trash-2',
-    REPORT_ARCHIVED: 'archive',
-    REPORT_UNARCHIVED: 'archive-restore',
-  };
+  // Search matches the actor's name and the rendered description (so
+  // searching "rex8875" or "archived" or a report title all work), not
+  // the raw action code or JSON details.
+  const rows = auditEntries.map((e) => ({ e, desc: describeAuditEntry(e) }));
+  const q = auditSearchQuery;
+  const filtered = q
+    ? rows.filter(({ e, desc }) => {
+        const actor = (e.actorUsername || e.actorDiscordId || '').toLowerCase();
+        return actor.includes(q) || desc.replace(/<[^>]+>/g, '').toLowerCase().includes(q);
+      })
+    : rows;
 
-  // One human sentence per action, built from that action's own details
-  // shape instead of a generic label plus a raw JSON dump. Discord IDs
-  // embedded in details (target/to) are already resolved to usernames by
-  // listAuditLog, with the raw ID as a fallback if that person never
-  // verified. Anything not listed here still renders (falls back to the
-  // raw action name) instead of going blank.
-  function describeAuditEntry(e) {
-    let d = {};
-    try { d = e.details ? JSON.parse(e.details) : {}; } catch { d = {}; }
-    const target = escapeHtml(e.targetUsername || d.target || d.to || 'someone');
-
-    switch (e.action) {
-      case 'MEMBER_BANNED':
-        return `banned ${target}${d.reason ? ` — ${escapeHtml(d.reason)}` : ''}`;
-      case 'MEMBER_UNBANNED':
-        return `unbanned ${target}`;
-      case 'MEMBER_LEFT_DISCORD':
-        return 'left the Discord server';
-      case 'OWNERSHIP_TRANSFERRED':
-        return `transferred ownership to ${target}`;
-      case 'POINTS_ADJUSTED': {
-        const n = Math.abs(d.delta ?? 0);
-        const word = n === 1 ? 'point' : 'points';
-        return d.delta < 0 ? `removed ${n} ${word} from ${target}` : `gave ${target} ${n} ${word}`;
-      }
-      case 'SCORE_RESET':
-        return `reset ${target}'s score`;
-      case 'ROLE_PERMISSIONS_UPDATED':
-        return 'updated role permissions';
-      case 'ROLE_PERMISSIONS_REMOVED':
-        return 'cleared role permissions';
-      case 'SHARE_LINK_CREATED':
-        return `created a ${d.accessLevel === 'DEV' ? 'Dev' : 'View'} share link${d.label ? ` — "${escapeHtml(d.label)}"` : ''}`;
-      case 'SHARE_LINK_REVOKED':
-        return 'revoked a share link';
-      default:
-        return e.action.replace(/_/g, ' ').toLowerCase();
-    }
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="hint empty-state"><i data-lucide="search-x"></i> No matching actions.</div>';
+    if (window.lucide) window.lucide.createIcons();
+    return;
   }
 
-  list.innerHTML = entries
-    .map((e, i) => `
+  list.innerHTML = filtered
+    .map(({ e, desc }, i) => `
         <div class="audit-row animate__animated animate__fadeInUp animate__faster" style="animation-delay:${Math.min(i, 12) * 25}ms">
-          <div class="audit-row-icon"><i data-lucide="${ACTION_ICONS[e.action] || 'activity'}"></i></div>
+          <div class="audit-row-icon"><i data-lucide="${AUDIT_ACTION_ICONS[e.action] || 'activity'}"></i></div>
           <div class="audit-row-main">
-            <span class="audit-row-actor">${escapeHtml(e.actorUsername || e.actorDiscordId)}</span> ${describeAuditEntry(e)}
+            <span class="audit-row-actor">${escapeHtml(e.actorUsername || e.actorDiscordId)}</span> ${desc}
           </div>
           <div class="hint">${new Date(e.createdAt).toLocaleString()}</div>
         </div>`)
     .join('');
   if (window.lucide) window.lucide.createIcons();
 }
+
+document.getElementById('audit-search').addEventListener('input', (e) => {
+  auditSearchQuery = e.target.value.trim().toLowerCase();
+  applyAuditFilter();
+});
 
 load();
