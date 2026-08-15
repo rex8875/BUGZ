@@ -25,6 +25,8 @@ const {
   getLeaderboard,
   getWeeklyLeaderboard,
   adjustPointsManually,
+  getUserTheme,
+  setUserTheme,
 } = require('@bugtracker/db');
 const { postRetestMessage, listGuildRoles, listApplicationCommands } = require('../lib/discordRest');
 const requireAuthApi = require('../middleware/requireAuthApi');
@@ -66,6 +68,22 @@ router.get('/api/servers', async (req, res) => {
       permissions: a.permissions,
     })),
   );
+});
+
+// Personal, cross-device background theme — not scoped to any one
+// server, so this sits outside /api/servers/:serverId (that middleware
+// requires per-server dashboard access, which has nothing to do with
+// a preference that follows the person everywhere).
+router.get('/api/me/theme', async (req, res) => {
+  res.json({ theme: await getUserTheme(req.session.discordId) });
+});
+
+router.put('/api/me/theme', async (req, res) => {
+  try {
+    res.json({ theme: await setUserTheme(req.session.discordId, req.body.theme) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
 
 router.get('/api/servers/:serverId/me', (req, res) => {

@@ -1,14 +1,16 @@
 // Dashboard-wide background theme — a personal preference (not tied to
 // any one server) that stays consistent across the server list and
-// every per-server page. Separate from a server's own custom
+// every per-server page, and follows your Discord identity across
+// devices/browsers. Separate from a server's own custom
 // background/gradient, which a server owner sets for that server
 // specifically (see colorPicker.js) and which still layers on top of
 // whichever theme is active, only on that server's own board page.
 //
-// Stored client-side (localStorage) since this is purely cosmetic and
-// personal — no need for a backend field or an API round-trip just to
-// remember which background someone likes. The actual theme
-// definitions (body.theme-*) live in style.css.
+// Saved server-side (tied to your account) so it transfers between
+// devices, with localStorage as an instant local cache — applied
+// immediately on load with no network wait, then reconciled with the
+// server in the background in case it was changed elsewhere. The
+// actual theme definitions (body.theme-*) live in style.css.
 (function () {
   const THEMES = [
     { id: 'ink', label: 'Ink' },
@@ -19,8 +21,9 @@
     { id: 'glass', label: 'Glass' },
   ];
   const STORAGE_KEY = 'fieldlog-theme';
+  let popoverEls = null; // set once the picker UI exists, so a server reconciliation can update it if it already opened
 
-  function getTheme() {
+  function readLocal() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       return THEMES.some((t) => t.id === saved) ? saved : 'ink';
@@ -29,25 +32,63 @@
     }
   }
 
-  function applyTheme(id) {
-    for (const t of THEMES) document.body.classList.remove(`theme-${t.id}`);
-    if (id !== 'ink') document.body.classList.add(`theme-${id}`);
-  }
-
-  function setTheme(id) {
+  function writeLocal(id) {
     try {
       localStorage.setItem(STORAGE_KEY, id);
     } catch {
       // private browsing / storage disabled — theme still applies for
-      // this page view, it just won't be remembered next time
+      // this page view via the class below, it just won't be cached
     }
-    applyTheme(id);
   }
 
-  // Applied immediately (this script is loaded first, before the rest
-  // of the page body) rather than waiting for DOMContentLoaded, so the
-  // page doesn't visibly flash the default theme first.
-  applyTheme(getTheme());
+  function applyTheme(id) {
+    for (const t of THEMES) document.body.classList.remove(`theme-${t.id}`);
+    if (id !== 'ink') document.body.classList.add(`theme-${id}`);
+    if (popoverEls) {
+      popoverEls.forEach((el) => el.classList.toggle('active', el.dataset.theme === id));
+    }
+  }
+
+  // Sets the theme everywhere: applied to this page immediately, cached
+  // locally, and saved to the account in the background so it's there
+  // next time on any device. The background save is best-effort — if it
+  // fails (offline, session hiccup), the choice still applies for this
+  // page view, it just may not have transferred.
+  function setTheme(id, { skipSave = false } = {}) {
+    writeLocal(id);
+    applyTheme(id);
+    if (skipSave || typeof fetch !== 'function') return;
+    fetch('/api/me/theme', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: id }),
+    }).catch(() => {
+      // offline or not signed in on this request for some reason — the
+      // local choice above still stands for this page view
+    });
+  }
+
+  // Applied immediately from the local cache (this script loads first,
+  // before the rest of the page body) rather than waiting on a network
+  // round trip, so the page doesn't visibly flash the default theme.
+  applyTheme(readLocal());
+
+  // Reconcile with the account in the background — picks up a theme
+  // set on another device/browser since this one last saved a value.
+  if (typeof fetch === 'function') {
+    fetch('/api/me/theme')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.theme && data.theme !== readLocal()) {
+          writeLocal(data.theme);
+          applyTheme(data.theme);
+        }
+      })
+      .catch(() => {
+        // not signed in, offline, etc — the local cache (or default)
+        // already applied above stands as-is
+      });
+  }
 
   function buildPicker() {
     const btn = document.createElement('button');
@@ -65,12 +106,13 @@
         ${THEMES.map(
           (t) => `
           <div>
-            <div class="theme-swatch theme-swatch-${t.id} ${getTheme() === t.id ? 'active' : ''}" data-theme="${t.id}" title="${t.label}"></div>
+            <div class="theme-swatch theme-swatch-${t.id} ${readLocal() === t.id ? 'active' : ''}" data-theme="${t.id}" title="${t.label}"></div>
             <div class="theme-swatch-label">${t.label}</div>
           </div>`,
         ).join('')}
       </div>`;
     document.body.appendChild(popover);
+    popoverEls = [...popover.querySelectorAll('.theme-swatch')];
 
     function positionPopover() {
       const r = btn.getBoundingClientRect();
@@ -97,7 +139,6 @@
       const swatch = e.target.closest('[data-theme]');
       if (!swatch) return;
       setTheme(swatch.dataset.theme);
-      popover.querySelectorAll('.theme-swatch').forEach((el) => el.classList.toggle('active', el.dataset.theme === swatch.dataset.theme));
     });
 
     return btn;

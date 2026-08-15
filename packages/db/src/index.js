@@ -191,6 +191,23 @@ async function verifyUser({ discordId, discordUsername }) {
   });
 }
 
+// A personal, cross-device background theme preference — see theme.js.
+// Every web-dashboard session already has a User row (verifyUser runs
+// on every OAuth login), so there's no "not verified yet" case to
+// handle here the way there is elsewhere in this file.
+const DASHBOARD_THEMES = ['ink', 'aurora', 'mesh', 'cyber', 'duotone', 'glass'];
+
+async function getUserTheme(discordId) {
+  const user = await prisma.user.findUnique({ where: { discordId } });
+  return user?.dashboardTheme || 'ink';
+}
+
+async function setUserTheme(discordId, theme) {
+  if (!DASHBOARD_THEMES.includes(theme)) throw new Error('Not a recognized theme.');
+  await prisma.user.update({ where: { discordId }, data: { dashboardTheme: theme } });
+  return theme;
+}
+
 // Only the current owner can do this — checked against Server.ownerDiscordId
 // itself, which is also the single source of truth getEffectivePermissions
 // checks. No internal role to reassign; the moment this field changes,
@@ -1081,6 +1098,8 @@ module.exports = {
   isValidBackgroundStyle,
   getUserByDiscordId,
   verifyUser,
+  getUserTheme,
+  setUserTheme,
   transferOwnership,
   getMemberDiscordRoleIds,
   getDiscordRoleHierarchy,

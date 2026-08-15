@@ -15,6 +15,7 @@ model User {
   discordId       String       @unique
   discordUsername String
   verifiedAt      DateTime?
+  dashboardTheme  String?      // personal background theme choice — see theme.js; null means the default (Ink)
   createdAt       DateTime     @default(now())
   bugReports      BugReport[]  @relation("ReportedBy")
   guestAccess     GuestAccess[]
