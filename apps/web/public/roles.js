@@ -264,6 +264,9 @@ function renderAuditLog(entries) {
     ROLE_PERMISSIONS_REMOVED: 'shield-off',
     SHARE_LINK_CREATED: 'link',
     SHARE_LINK_REVOKED: 'link-2-off',
+    REPORT_DELETED: 'trash-2',
+    REPORT_ARCHIVED: 'archive',
+    REPORT_UNARCHIVED: 'archive-restore',
   };
 
   // One human sentence per action, built from that action's own details

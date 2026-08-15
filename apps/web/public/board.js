@@ -53,30 +53,42 @@ function showToast(icon, title) {
   window.Swal.fire({ toast: true, position: 'top-end', icon, title, showConfirmButton: false, timer: 2200, timerProgressBar: true });
 }
 
-// Real, styled confirm/prompt dialogs instead of the browser's native
-// unstyled confirm()/prompt() (which can't be themed at all and look
-// completely out of place next to the rest of the UI). Falls back to
-// the native dialogs wherever SweetAlert2 isn't loaded, so this stays
-// fully testable without depending on a network-loaded script.
-async function confirmDialog({ title, text, confirmText = 'Confirm', danger = false }) {
-  if (!window.Swal) return window.confirm(`${title}\n${text || ''}`);
-  const result = await window.Swal.fire({
-    title, text, icon: 'warning', showCancelButton: true,
-    confirmButtonText: confirmText, cancelButtonText: 'Cancel',
-    confirmButtonColor: danger ? '#e5484d' : undefined,
-    reverseButtons: true,
-  });
-  return result.isConfirmed;
-}
+// Custom confirm modal — a real element already sitting in board.html,
+// shown/hidden with plain CSS rather than a library computing its own
+// position. Replaces the old SweetAlert2-based confirm(), which could
+// end up rendered somewhere other than the visible viewport depending
+// on the environment it was viewed in.
+function confirmModal({ title, text, confirmText = 'Confirm', danger = false }) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('confirm-modal');
+    overlay.querySelector('#confirm-modal-title').textContent = title;
+    overlay.querySelector('#confirm-modal-text').textContent = text || '';
+    const confirmBtn = overlay.querySelector('#confirm-modal-confirm');
+    const cancelBtn = overlay.querySelector('#confirm-modal-cancel');
+    confirmBtn.textContent = confirmText;
+    confirmBtn.classList.toggle('danger', danger);
 
-async function promptDialog({ title, initialValue = '' }) {
-  if (!window.Swal) return window.prompt(title, initialValue);
-  const result = await window.Swal.fire({
-    title, input: 'text', inputValue: initialValue,
-    showCancelButton: true, confirmButtonText: 'Save', cancelButtonText: 'Cancel',
-    inputValidator: (value) => (!value || !value.trim() ? 'Cannot be empty' : undefined),
+    const close = (result) => {
+      overlay.style.display = 'none';
+      confirmBtn.removeEventListener('click', onConfirm);
+      cancelBtn.removeEventListener('click', onCancel);
+      overlay.removeEventListener('mousedown', onOverlayClick);
+      document.removeEventListener('keydown', onKeydown);
+      resolve(result);
+    };
+    const onConfirm = () => close(true);
+    const onCancel = () => close(false);
+    const onOverlayClick = (e) => { if (e.target === overlay) close(false); };
+    const onKeydown = (e) => { if (e.key === 'Escape') close(false); };
+
+    confirmBtn.addEventListener('click', onConfirm);
+    cancelBtn.addEventListener('click', onCancel);
+    overlay.addEventListener('mousedown', onOverlayClick);
+    document.addEventListener('keydown', onKeydown);
+
+    overlay.style.display = 'flex';
+    confirmBtn.focus();
   });
-  return result.isConfirmed ? result.value : null;
 }
 
 async function load() {
@@ -488,9 +500,9 @@ function bindDetailPanelEvents() {
   const deleteBtn = panel.querySelector('[data-delete-report]');
   if (deleteBtn) {
     deleteBtn.addEventListener('click', async () => {
-      const confirmed = await confirmDialog({
+      const confirmed = await confirmModal({
         title: 'Delete this report?',
-        text: 'This cannot be undone.',
+        text: 'This report and its evidence links will be permanently removed. This can\'t be undone.',
         confirmText: 'Delete permanently',
         danger: true,
       });

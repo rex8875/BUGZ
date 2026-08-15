@@ -151,15 +151,18 @@ test('board.html: deleting a report requires confirmation — cancelling must no
     },
   });
   const doc = dom.window.document;
-  dom.window.confirm = () => false; // SweetAlert2 isn't loaded in this test sandbox, so the code falls back to window.confirm
   doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 10));
   doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 10));
 
   doc.querySelector('[data-delete-report]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(doc.getElementById('confirm-modal').style.display, 'flex', 'sanity check: the confirm modal should be open');
+  doc.getElementById('confirm-modal-cancel').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
 
+  assert.equal(doc.getElementById('confirm-modal').style.display, 'none', 'the modal should close on cancel');
   assert.equal(calls.some((c) => c.method === 'DELETE'), false, 'cancelling the confirmation must never send the delete request');
   assert.ok(doc.querySelector('#report-list .detail-panel'), 'the report should still be visible, nothing was deleted');
 });
@@ -177,20 +180,47 @@ test('board.html: confirming the delete dialog actually removes the report from 
     },
   });
   const doc = dom.window.document;
-  dom.window.confirm = () => true;
   doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 10));
   doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 10));
 
   doc.querySelector('[data-delete-report]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.getElementById('confirm-modal-confirm').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 20));
 
   assert.ok(calls.some((c) => c.method === 'DELETE' && c.url.includes('r1')), 'confirming should send the DELETE request for the right report');
   assert.equal(doc.querySelector('.report-row'), null, 'the deleted report must no longer appear in the list');
 });
 
-test('board.html: editing the title cancels cleanly if the dialog is dismissed — no PATCH sent', async () => {
+test('board.html: pressing Escape while the confirm modal is open cancels it', async () => {
+  const calls = [];
+  const dom = await renderPage({
+    htmlFile: 'board.html', scripts: ['board.js'],
+    fetchImpl: async (url, options = {}) => {
+      calls.push({ url: String(url), method: options.method || 'GET' });
+      if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
+      if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
+      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+    },
+  });
+  const doc = dom.window.document;
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  doc.querySelector('[data-delete-report]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+  doc.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  assert.equal(doc.getElementById('confirm-modal').style.display, 'none', 'Escape should close the modal');
+  assert.equal(calls.some((c) => c.method === 'DELETE'), false, 'Escape must not confirm the deletion');
+});
+
+test('board.html: editing the title cancels cleanly on Escape — no PATCH sent, original text restored', async () => {
   const calls = [];
   const dom = await renderPage({
     htmlFile: 'board.html', scripts: ['board.js'],
@@ -202,19 +232,24 @@ test('board.html: editing the title cancels cleanly if the dialog is dismissed �
     },
   });
   const doc = dom.window.document;
-  dom.window.prompt = () => null; // dismissed
   doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 10));
   doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 10));
 
   doc.querySelector('[data-edit-title]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  const field = doc.querySelector('.detail-title-row .inline-edit-field');
+  assert.ok(field, 'sanity check: editing should swap in a real input, no popup');
+  field.value = 'Something I changed my mind about';
+  field.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   await new Promise((r) => setTimeout(r, 20));
 
-  assert.equal(calls.some((c) => c.method === 'PATCH'), false, 'dismissing the title dialog must never send a PATCH request');
+  assert.equal(calls.some((c) => c.method === 'PATCH'), false, 'Escape must never send a PATCH request');
+  assert.equal(doc.querySelector('.detail-title-row .inline-edit-field'), null, 'the field should revert back to display text');
+  assert.match(doc.querySelector('[data-title-text]').textContent, /Original title/);
 });
 
-test('board.html: editing the title actually updates it when a new value is given', async () => {
+test('board.html: editing the title actually updates it when Enter is pressed with a new value', async () => {
   const calls = [];
   const dom = await renderPage({
     htmlFile: 'board.html', scripts: ['board.js'],
@@ -227,13 +262,15 @@ test('board.html: editing the title actually updates it when a new value is give
     },
   });
   const doc = dom.window.document;
-  dom.window.prompt = () => 'Brand new title';
   doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 10));
   doc.querySelector('.report-row').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   await new Promise((r) => setTimeout(r, 10));
 
   doc.querySelector('[data-edit-title]').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  const field = doc.querySelector('.detail-title-row .inline-edit-field');
+  field.value = 'Brand new title';
+  field.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   await new Promise((r) => setTimeout(r, 20));
 
   const patchCall = calls.find((c) => c.method === 'PATCH');

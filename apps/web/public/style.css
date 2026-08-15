@@ -952,6 +952,24 @@ section h2 { font-family: var(--font-display); font-size: 16px; color: var(--tex
 @media (max-width: 640px) {
   .lb-podium { flex-direction: column; }
   .lb-podium-card.rank-1, .lb-podium-card.rank-2, .lb-podium-card.rank-3 { margin-bottom: 0; }
+
+  .container { padding: 20px 12px 40px; }
+  body { padding-left: 56px; }
+  #server-rail { width: 56px; }
+
+  /* label-above-value instead of side-by-side — a fixed 110px label
+     column leaves too little room for the value on a phone-width
+     screen */
+  .detail-row { flex-direction: column; gap: 2px; }
+  .detail-row .label { width: auto; }
+
+  .detail-panel { padding: 18px 16px; }
+  .detail-panel h2, .detail-title-row .inline-edit-field { font-size: 19px; }
+  .raw-link { max-width: 100%; }
+
+  .modal-box { padding: 18px; }
+  .modal-actions { justify-content: stretch; }
+  .modal-actions button { flex: 1; }
 }
 
 /* Respect the OS-level "reduce motion" preference across every
@@ -1080,3 +1098,53 @@ section h2 { font-family: var(--font-display); font-size: 16px; color: var(--tex
   box-shadow: var(--shadow-md) !important;
 }
 .swal2-toast .swal2-title { font-size: 13px !important; font-family: var(--font-body) !important; font-weight: 600 !important; }
+
+/* ---- custom confirm modal — replaces the SweetAlert2 confirm(),
+   see board.js confirmModal() for why ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 16, 0.72);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+.modal-box {
+  background: var(--ink-card);
+  border: 1px solid var(--line-bright);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 22px 24px;
+  width: min(420px, 100%);
+}
+.modal-box h3 { font-family: var(--font-display); font-size: 17px; font-weight: 700; margin: 0 0 8px; }
+.modal-box .hint { margin: 0 0 18px; font-size: 13px; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.modal-actions button { padding: 8px 16px; }
+.modal-actions button.danger { background: var(--critical); color: #fff; border-color: var(--critical); }
+.modal-actions button.danger:hover { background: #c73e39; }
+
+/* ---- inline edit fields (title/description) — a real input/textarea
+   swapped in for the display text, not a popup ---- */
+.inline-edit-field {
+  width: 100%;
+  background: var(--ink-raised);
+  border: 1px solid var(--amber);
+  border-radius: 6px;
+  color: var(--text);
+  font: inherit;
+  padding: 6px 9px;
+  box-shadow: 0 0 0 2px var(--amber-dim);
+}
+.detail-title-row .inline-edit-field { font-family: var(--font-display); font-size: 22px; font-weight: 700; }
+textarea.inline-edit-field { resize: vertical; min-height: 60px; }
+.detail-title-row { display: flex; align-items: center; gap: 10px; }
+.detail-desc-row { display: flex; align-items: baseline; gap: 8px; flex: 1; min-width: 0; }
+.detail-desc-row .detail-desc-text { flex: 1; min-width: 0; }
+
+/* the first child of a cmd-row header (name+description, or role name)
+   needs to actually shrink/wrap instead of pushing the status pill off
+   the edge on narrow screens */
+.cmd-row-header > div:first-child { flex: 1; min-width: 0; }

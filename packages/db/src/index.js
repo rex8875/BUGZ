@@ -1017,6 +1017,11 @@ async function updateBugReport({ serverId, actingDiscordId, bugReportId, request
   }
 
   await prisma.bugReport.updateMany({ where: { id: bugReportId, serverId }, data });
+
+  if (Object.prototype.hasOwnProperty.call(data, 'archivedAt')) {
+    await logAction(serverId, actingDiscordId, data.archivedAt ? 'REPORT_ARCHIVED' : 'REPORT_UNARCHIVED', { title: existing.title });
+  }
+
   return prisma.bugReport.findUnique({ where: { id: bugReportId } });
 }
 
@@ -1028,8 +1033,11 @@ async function deleteBugReport({ serverId, actingDiscordId, bugReportId }) {
   const perms = await getEffectivePermissions(serverId, actingDiscordId);
   if (!perms?.canDeleteReports) throw new Error('Not permitted to delete reports in this server.');
 
-  const { count } = await prisma.bugReport.deleteMany({ where: { id: bugReportId, serverId } });
-  if (count === 0) throw new Error('Bug report not found in this server.');
+  const existing = await prisma.bugReport.findFirst({ where: { id: bugReportId, serverId } });
+  if (!existing) throw new Error('Bug report not found in this server.');
+
+  await prisma.bugReport.deleteMany({ where: { id: bugReportId, serverId } });
+  await logAction(serverId, actingDiscordId, 'REPORT_DELETED', { title: existing.title });
 }
 
 // Quick counts for a dashboard summary strip — one query instead of
