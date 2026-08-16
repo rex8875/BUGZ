@@ -129,11 +129,13 @@ function createSingleColorPicker({ initialHex = '#e8a33d' } = {}) {
     const hex = rgbToHex(r, g, b);
     swatch.style.background = hex;
     hexInput.value = hex;
+    lastValidHex = hex;
     drawWheel(canvas, v);
     positionCursor();
   }
 
   lightness.value = String(Math.round(v * 100));
+  let lastValidHex;
   syncFromHsv();
 
   canvas.addEventListener('pointerdown', (e) => {
@@ -165,7 +167,12 @@ function createSingleColorPicker({ initialHex = '#e8a33d' } = {}) {
 
   hexInput.addEventListener('change', () => {
     if (!isValidHex(hexInput.value)) {
-      hexInput.value = swatch.style.background ? rgbToHex(...hexToRgb(swatch.style.background)) : '#e8a33d';
+      // Was reading back swatch.style.background here, but the browser
+      // normalizes that to "rgb(r, g, b)" notation — feeding that into
+      // hexToRgb (a hex-only parser) doesn't throw, it silently
+      // mis-parses to black via NaN coercion, so an invalid hex was
+      // reverting to #000000 instead of the actual last valid color.
+      hexInput.value = lastValidHex;
       return;
     }
     [h, s, v] = rgbToHsv(...hexToRgb(hexInput.value));
