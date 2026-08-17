@@ -56,6 +56,7 @@ test('/my-bugs shows only the caller\'s reports, paginated, with a Next button w
     const interaction = {
       guildId: 'g1',
       user: { id: 'tester1' },
+      options: { getString: () => null },
       reply: async (payload) => { replies.push(payload); },
     };
 
@@ -84,7 +85,7 @@ test('/bugs-by shows the specified user\'s reports, not the caller\'s', async ()
     const interaction = {
       guildId: 'g1',
       user: { id: 'owner1' }, // the caller is the owner...
-      options: { getUser: () => ({ id: 'tester1', username: 'Tester1' }) }, // ...looking up tester1
+      options: { getUser: () => ({ id: 'tester1', username: 'Tester1' }), getString: () => null }, // ...looking up tester1
       reply: async (payload) => { interaction._reply = payload; },
     };
 

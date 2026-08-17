@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { getServerByDiscordId, getEffectivePermissions, queryBugReports } = require('@bugtracker/db');
-const { buildBugListPayload } = require('../lib/bugListPayload');
+const { buildBugListPayload, parseExcludeStatuses, STATUS_LABELS } = require('../lib/bugListPayload');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -20,6 +20,13 @@ module.exports = {
           { name: 'High', value: 'HIGH' },
           { name: 'Critical', value: 'CRITICAL' },
         ),
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('exclude')
+        .setDescription("Statuses to leave out, comma-separated — e.g. \"Fixed, Won't fix\"")
+        .setRequired(false)
+        .setMaxLength(100),
     ),
 
   async execute(interaction) {
@@ -31,16 +38,26 @@ module.exports = {
       return interaction.reply({ content: "You don't have permission to view bug reports in this server.", ephemeral: true });
     }
 
+    const { excludeStatuses, invalid } = parseExcludeStatuses(interaction.options.getString('exclude'));
+    if (invalid.length) {
+      return interaction.reply({
+        content: `Didn't recognize: ${invalid.join(', ')}. Valid statuses: ${Object.values(STATUS_LABELS).join(', ')}.`,
+        ephemeral: true,
+      });
+    }
+
     const search = interaction.options.getString('search');
     const priority = interaction.options.getString('priority');
-    const queryResult = await queryBugReports(server.id, { search, priority, page: 1, pageSize: 5 });
+    const queryResult = await queryBugReports(server.id, { search, priority, excludeStatuses, page: 1, pageSize: 5 });
 
+    const excludeNote = excludeStatuses.length ? ` (excluding ${excludeStatuses.map((s) => STATUS_LABELS[s]).join(', ')})` : '';
     const payload = buildBugListPayload({
-      title: search ? `Reports matching "${search}"` : 'Open reports',
+      title: (search ? `Reports matching "${search}"` : 'Open reports') + excludeNote,
       queryResult,
       mode: 'all',
       priority,
       search,
+      excludeStatuses,
       emptyMessage: search ? `No reports match "${search}". Looks like a new one!` : 'No reports match those filters.',
     });
 

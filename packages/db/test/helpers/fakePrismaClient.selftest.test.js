@@ -321,3 +321,21 @@ test('each createFakePrismaClient() call is fully isolated from previous ones', 
   const dbB = createFakePrismaClient();
   assert.equal(dbB.user.findMany({ where: {} }).length, 0, 'a fresh client must start empty regardless of other instances');
 });
+
+test('where: { field: { in / notIn: [...] } } matches real Prisma semantics', () => {
+  const db = createFakePrismaClient();
+  const server = db.server.create({ data: { discordServerId: 'g1', name: 'S', ownerDiscordId: 'o1' } });
+  const a = db.bugReport.create({ data: { serverId: server.id, bugNumber: 1, title: 'A', description: 'd', priority: 'LOW', status: 'NEW' } });
+  const b = db.bugReport.create({ data: { serverId: server.id, bugNumber: 2, title: 'B', description: 'd', priority: 'LOW', status: 'FIXED' } });
+  db.bugReport.create({ data: { serverId: server.id, bugNumber: 3, title: 'C', description: 'd', priority: 'LOW', status: 'WONT_FIX' } });
+
+  const inResult = db.bugReport.findMany({ where: { status: { in: ['NEW', 'FIXED'] } } });
+  assert.deepEqual(inResult.map((r) => r.id).sort(), [a.id, b.id].sort());
+
+  const notInResult = db.bugReport.findMany({ where: { status: { notIn: ['NEW', 'FIXED'] } } });
+  assert.equal(notInResult.length, 1);
+  assert.equal(notInResult[0].title, 'C');
+
+  const notInEmpty = db.bugReport.findMany({ where: { status: { notIn: [] } } });
+  assert.equal(notInEmpty.length, 3, 'excluding nothing should exclude nothing');
+});

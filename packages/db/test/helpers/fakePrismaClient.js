@@ -191,6 +191,9 @@ class Table {
       if ('in' in value) {
         return Array.isArray(value.in) && value.in.some((v) => valuesEqual(record[key], v));
       }
+      if ('notIn' in value) {
+        return Array.isArray(value.notIn) && !value.notIn.some((v) => valuesEqual(record[key], v));
+      }
       throw new Error(`Unsupported where operator on ${key}: ${JSON.stringify(value)}`);
     }
 

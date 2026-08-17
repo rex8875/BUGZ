@@ -793,6 +793,7 @@ async function queryBugReports(serverId, options = {}) {
     byUsername,          // partial-match on reporter's username: for the search bar's by: token
     priority,
     status,
+    excludeStatuses,     // array of status values to exclude — e.g. /list-bugs exclude: Fixed, Won't fix
     archived = false,    // "non-archived, non-deleted" is the default everywhere
     search,              // free text, matches title OR description
     before, on, after,   // 'YYYY-MM-DD' strings
@@ -801,11 +802,20 @@ async function queryBugReports(serverId, options = {}) {
     pageSize = 10,
   } = options;
 
+  // A single-status include and a multi-status exclude are two different
+  // ways of expressing a status filter — no current caller sends both,
+  // but if one ever did, the more specific single include wins rather
+  // than silently combining into a Prisma shape that may not behave as
+  // either side would expect.
+  let statusFilter;
+  if (status) statusFilter = status;
+  else if (excludeStatuses && excludeStatuses.length) statusFilter = { notIn: excludeStatuses };
+
   const where = {
     serverId,
     archivedAt: archived ? { not: null } : null,
     ...(priority ? { priority } : {}),
-    ...(status ? { status } : {}),
+    ...(statusFilter !== undefined ? { status: statusFilter } : {}),
     ...(device ? { device } : {}),
   };
 
