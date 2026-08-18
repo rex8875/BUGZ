@@ -102,6 +102,33 @@ test('no exclude filter encodes/decodes as null, not an empty array mistaken for
   assert.equal(decodeBugListCustomId(nextButtonCustomId).excludeStatuses, null);
 });
 
+test('buildBugListPayload includes a Refresh button that re-encodes the SAME page, not page+1/page-1', () => {
+  const payload = buildBugListPayload({
+    title: 'x',
+    queryResult: { reports: [{ id: 'r1', bugNumber: 1, title: 't', priority: 'LOW', status: 'NEW', createdAt: new Date() }], page: 2, totalPages: 3, totalCount: 20 },
+    mode: 'all',
+    priority: 'HIGH',
+    excludeStatuses: ['FIXED'],
+    emptyMessage: 'none',
+  });
+  const refreshButton = payload.components[0].components[2];
+  assert.match(refreshButton.data.label, /Refresh/);
+  const decoded = decodeBugListCustomId(refreshButton.data.custom_id);
+  assert.equal(decoded.page, 2, 'refresh must stay on the current page, not move to a different one');
+  assert.equal(decoded.priority, 'HIGH', 'refresh must preserve the active filters');
+  assert.deepEqual(decoded.excludeStatuses, ['FIXED']);
+});
+
+test('the footer shows an "updated" timestamp, so a refresh is visibly confirmed', () => {
+  const payload = buildBugListPayload({
+    title: 'x',
+    queryResult: { reports: [{ id: 'r1', bugNumber: 1, title: 't', priority: 'LOW', status: 'NEW', createdAt: new Date() }], page: 1, totalPages: 1, totalCount: 1 },
+    mode: 'all',
+    emptyMessage: 'none',
+  });
+  assert.match(payload.embeds[0].data.footer.text, /updated \d/);
+});
+
 // ---- /list-bugs ----
 
 test('/list-bugs exclude: excludes exactly the requested statuses, nothing else', async () => {
@@ -178,6 +205,51 @@ test('/bugs-by exclude: excludes the given statuses from the target user\'s repo
     await handler.execute(interaction);
     assert.equal(interaction._reply.embeds[0].data.footer.text.includes('3 reports'), true);
   });
+});
+
+test('clicking Refresh re-fetches fresh data through interactionCreate.js, without re-running the slash command', async () => {
+  const { installDiscordRoleMock: installMock } = require('../../../packages/db/test/helpers/discordRoleMock');
+  const { createFakePrismaClient } = require('../../../packages/db/test/helpers/fakePrismaClient');
+  const fakeClient = createFakePrismaClient();
+  const prismaClientPath = require.resolve('@prisma/client');
+  const originalPrismaCache = require.cache[prismaClientPath];
+  require.cache[prismaClientPath] = { id: prismaClientPath, filename: prismaClientPath, loaded: true, exports: { PrismaClient: function () { return fakeClient; } } };
+  const dbModulePath = require.resolve('@bugtracker/db');
+  const originalDbCache = require.cache[dbModulePath];
+  delete require.cache[dbModulePath];
+  const interactionCreatePath = require.resolve('../src/events/interactionCreate.js');
+  delete require.cache[interactionCreatePath];
+  const interactionCreate = require(interactionCreatePath);
+  const dbModule = require(dbModulePath);
+  if (originalPrismaCache) require.cache[prismaClientPath] = originalPrismaCache;
+  else delete require.cache[prismaClientPath];
+
+  const roleMock = installMock();
+  try {
+    const server = await seedWithMixedStatuses(dbModule, roleMock);
+
+    // Simulate someone reporting a new bug after the original /list-bugs
+    // reply was sent, then clicking Refresh on that same message.
+    await dbModule.createBugReport(server.id, 'tester1', { title: 'Brand new, reported after the original reply', description: 'd', priority: 'LOW', device: 'PC' });
+
+    const interaction = {
+      isAutocomplete: () => false,
+      isChatInputCommand: () => false,
+      isButton: () => true,
+      isModalSubmit: () => false,
+      customId: 'buglist:all:1:-:-:-:-', // page 1, no filters — a Refresh click on the original reply
+      user: { id: 'owner1' },
+      guildId: 'g1',
+      update: async (payload) => { interaction._update = payload; },
+    };
+    await interactionCreate.execute(interaction);
+
+    assert.equal(interaction._update.embeds[0].data.footer.text.includes('6 reports'), true, '5 seeded + 1 new one, picked up by the refresh');
+  } finally {
+    roleMock.restore();
+    if (originalDbCache) require.cache[dbModulePath] = originalDbCache;
+    else delete require.cache[dbModulePath];
+  }
 });
 
 // ---- archived exclusion (already correct behavior — verifying, not changing) ----

@@ -226,8 +226,8 @@ model BugReport {
   updatedAt        DateTime   @updatedAt
   archivedAt        DateTime?
   // True once a point has been deducted for this report being marked
-  // DUPLICATE — lets the status flip back and forth without double
-  // deducting or double-refunding.
+  // DUPLICATE or NOT_A_BUG — lets the status flip back and forth (including
+  // between those two statuses) without double deducting or double refunding.
   pointDeducted    Boolean    @default(false)
 
   @@unique([serverId, bugNumber])

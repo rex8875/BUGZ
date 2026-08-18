@@ -113,8 +113,8 @@ router.patch('/api/servers/:serverId/appearance', async (req, res) => {
 });
 
 router.get('/api/servers/:serverId/reports', async (req, res) => {
-  const { priority, status, archived, search, before, on, after, by, device } = req.query;
-  const { reports } = await queryBugReports(req.server.id, {
+  const { priority, status, archived, search, before, on, after, by, device, page } = req.query;
+  const result = await queryBugReports(req.server.id, {
     priority: priority || undefined,
     status: status || undefined,
     archived: archived === 'true',
@@ -124,15 +124,10 @@ router.get('/api/servers/:serverId/reports', async (req, res) => {
     after: after || undefined,
     byUsername: by || undefined,
     device: device || undefined,
-    // The dashboard board doesn't paginate (yet) — it renders one full
-    // filtered list — so this asks for effectively "everything that
-    // matches" rather than a page. queryBugReports still needs SOME
-    // cap; 500 is far beyond what a single board view would ever
-    // usefully show at once.
-    page: 1,
-    pageSize: 500,
+    page: Math.max(1, Number(page) || 1),
+    pageSize: 15,
   });
-  res.json(reports);
+  res.json(result);
 });
 
 router.get('/api/servers/:serverId/summary', async (req, res) => {

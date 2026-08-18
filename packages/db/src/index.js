@@ -989,10 +989,13 @@ async function getBugReport(serverId, bugReportId) {
 // have pre-filtered requestedChanges — status/priority needs canManageBugs,
 // content fields need canEditReports, checked here regardless of what the
 // route layer already did.
-// Also handles the leaderboard side-effect of a status moving into or
-// out of DUPLICATE — exactly one point deducted/refunded per report,
-// ever, tracked via pointDeducted so flapping the status back and forth
-// can't double-charge or double-refund.
+// Also handles the leaderboard side-effect of a status moving into or out
+// of a point-deducting status (DUPLICATE or NOT_A_BUG) — exactly one point
+// deducted/refunded per report, ever, tracked via pointDeducted so flapping
+// the status back and forth (including directly between DUPLICATE and
+// NOT_A_BUG) can't double-charge or double-refund.
+const POINT_DEDUCTING_STATUSES = ['DUPLICATE', 'NOT_A_BUG'];
+
 async function updateBugReport({ serverId, actingDiscordId, bugReportId, requestedChanges }) {
   const existing = await prisma.bugReport.findFirst({ where: { id: bugReportId, serverId } });
   if (!existing) throw new Error('Bug report not found in this server.');
@@ -1032,15 +1035,23 @@ async function updateBugReport({ serverId, actingDiscordId, bugReportId, request
 
   if (data.status && data.status !== existing.status) {
     const reportWeek = getWeekStart(existing.createdAt);
-    if (data.status === 'DUPLICATE' && !existing.pointDeducted) {
+    const movingToDeductingStatus = POINT_DEDUCTING_STATUSES.includes(data.status);
+    const wasInDeductingStatus = POINT_DEDUCTING_STATUSES.includes(existing.status);
+
+    if (movingToDeductingStatus && !existing.pointDeducted) {
+      // Covers moving in from a non-deducting status. Also safely covers
+      // DUPLICATE <-> NOT_A_BUG in the (normally-impossible) case
+      // pointDeducted was somehow already false.
       await adjustLeaderboardPoints(serverId, existing.reporterId, -1);
       await adjustWeeklyPoints(serverId, existing.reporterId, reportWeek, -1);
       data.pointDeducted = true;
-    } else if (existing.status === 'DUPLICATE' && data.status !== 'DUPLICATE' && existing.pointDeducted) {
+    } else if (!movingToDeductingStatus && wasInDeductingStatus && existing.pointDeducted) {
       await adjustLeaderboardPoints(serverId, existing.reporterId, 1);
       await adjustWeeklyPoints(serverId, existing.reporterId, reportWeek, 1);
       data.pointDeducted = false;
     }
+    // else: moving directly between DUPLICATE and NOT_A_BUG — already
+    // deducted, stays deducted, no double-charge or refund either way.
   }
 
   await prisma.bugReport.updateMany({ where: { id: bugReportId, serverId }, data });

@@ -65,14 +65,18 @@ function buildBugListPayload({ title, queryResult, mode, priority, search, targe
     .setTitle(title)
     .setColor(0x5865f2)
     .setDescription(reports.map(reportLine).join('\n\n'))
-    .setFooter({ text: `Page ${page} of ${totalPages} · ${totalCount} report${totalCount === 1 ? '' : 's'} · tap a # below to view one` });
+    .setFooter({ text: `Page ${page} of ${totalPages} · ${totalCount} report${totalCount === 1 ? '' : 's'} · tap a # below to view one · updated ${new Date().toLocaleTimeString()}` });
 
   const encode = (p) =>
     ['buglist', mode, p, priority || '-', encodeURIComponent((search || '-').slice(0, 40)), targetDiscordId || '-', encodeExcludeStatuses(excludeStatuses)].join(':');
 
+  // Refresh reuses today's exact same page/filters (encode(page), not
+  // page ± 1) — clicking it just re-runs the same query for fresh data,
+  // the same pattern /leaderboard's refresh button uses.
   const navRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(encode(page - 1)).setLabel('◀ Previous').setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
     new ButtonBuilder().setCustomId(encode(page + 1)).setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(page >= totalPages),
+    new ButtonBuilder().setCustomId(encode(page)).setLabel('🔄 Refresh').setStyle(ButtonStyle.Secondary),
   );
 
   // Read-only detail view, without ever leaving Discord: one small

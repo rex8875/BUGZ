@@ -18,6 +18,9 @@ const state = {
   selectedId: null,
   expandedId: null,
   filter: { status: null, priority: null, archived: false, search: null, before: null, on: null, after: null, byUsername: null, device: null },
+  page: 1,
+  totalPages: 1,
+  totalCount: 0,
 };
 
 async function api(path, options = {}) {
@@ -216,10 +219,16 @@ async function loadReports() {
   if (state.filter.after) params.set('after', state.filter.after);
   if (state.filter.byUsername) params.set('by', state.filter.byUsername);
   if (state.filter.device) params.set('device', state.filter.device);
-  state.reports = await api(`/api/servers/${serverId}/reports?${params}`);
+  params.set('page', state.page);
+  const result = await api(`/api/servers/${serverId}/reports?${params}`);
+  state.reports = result.reports;
+  state.page = result.page;
+  state.totalPages = result.totalPages;
+  state.totalCount = result.totalCount;
   if (state.expandedId && !state.reports.some((r) => r.id === state.expandedId)) state.expandedId = null;
   renderFilters();
   renderList();
+  renderPagination();
 }
 
 function renderFilters() {
@@ -239,12 +248,14 @@ function renderFilters() {
     el.addEventListener('click', () => {
       state.filter.status = el.dataset.status || null;
       state.filter.archived = false;
+      state.page = 1;
       loadReports();
     });
   });
   document.querySelector('[data-archived]').addEventListener('click', () => {
     state.filter.archived = true;
     state.filter.status = null;
+    state.page = 1;
     loadReports();
   });
 
@@ -260,7 +271,62 @@ function renderFilters() {
   document.getElementById('priority-filters').querySelectorAll('[data-priority]').forEach((el) => {
     el.addEventListener('click', () => {
       state.filter.priority = el.dataset.priority || null;
+      state.page = 1;
       loadReports();
+    });
+  });
+}
+
+function renderPagination() {
+  const container = document.getElementById('pagination');
+  if (!container) return;
+
+  if (state.totalCount === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = `
+    <span class="pagination-count">${state.totalCount} report${state.totalCount === 1 ? '' : 's'}</span>
+    ${
+      state.totalPages > 1
+        ? `<div class="pagination-nav">
+            <button data-page-prev ${state.page <= 1 ? 'disabled' : ''}>◀ Prev</button>
+            <span class="pagination-page-indicator">Page <span class="page-num-text" data-page-num tabindex="0">${state.page}</span> of ${state.totalPages}</span>
+            <button data-page-next ${state.page >= state.totalPages ? 'disabled' : ''}>Next ▶</button>
+          </div>`
+        : ''
+    }`;
+
+  if (state.totalPages <= 1) return;
+
+  document.querySelector('[data-page-prev]').addEventListener('click', () => {
+    if (state.page <= 1) return;
+    state.page -= 1;
+    loadReports();
+  });
+  document.querySelector('[data-page-next]').addEventListener('click', () => {
+    if (state.page >= state.totalPages) return;
+    state.page += 1;
+    loadReports();
+  });
+
+  // Same inline-edit pattern as the title/description fields — click the
+  // page number, it becomes a real input in place. Enter saves, Escape
+  // cancels, clicking away saves.
+  document.querySelector('[data-page-num]').addEventListener('click', (e) => {
+    startInlineEdit({
+      textEl: e.target,
+      currentValue: String(state.page),
+      onSave: async (next) => {
+        const n = parseInt(next, 10);
+        if (!Number.isInteger(n) || n < 1 || n > state.totalPages) {
+          showError(`Enter a page number between 1 and ${state.totalPages}.`);
+          throw new Error('invalid page number');
+        }
+        state.page = n;
+        await loadReports();
+      },
     });
   });
 }
@@ -762,6 +828,7 @@ function updateSearchHint() {
 function runSearch(rawValue) {
   const parsed = parseSearchInput(rawValue);
   Object.assign(state.filter, parsed);
+  state.page = 1;
   updateSearchHint();
   loadReports();
 }
