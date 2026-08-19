@@ -23,7 +23,7 @@ test('board.html: zero reports renders a graceful empty state, no crash', async 
     fetchImpl: async (url) => {
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: {}, retestChannelId: null, testerPingRoleId: null, serverName: 'Empty', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 0 }) };
-      return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, json: async () => ({ reports: [], page: 1, totalPages: 1, totalCount: [].length }) };
     },
   });
   const doc = dom.window.document;
@@ -64,7 +64,7 @@ test('board.html: an extremely long title (10,000 chars) does not crash renderin
     fetchImpl: async (url) => {
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: {}, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
-      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: longTitle, priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+      return { ok: true, status: 200, json: async () => ({ reports: [{ id: 'r1', title: longTitle, priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }], page: 1, totalPages: 1, totalCount: [{ id: 'r1', title: longTitle, priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }].length }) };
     },
   });
   const doc = dom.window.document;
@@ -79,7 +79,7 @@ test('board.html: search with a malformed date token (on:notadate) does not cras
       calledUrls.push(String(url));
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: {}, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 0 }) };
-      return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, json: async () => ({ reports: [], page: 1, totalPages: 1, totalCount: [].length }) };
     },
   });
   const doc = dom.window.document;
@@ -100,7 +100,7 @@ test('board.html: repeatedly clicking the same report row does not create two de
     fetchImpl: async (url) => {
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
-      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+      return { ok: true, status: 200, json: async () => ({ reports: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }], page: 1, totalPages: 1, totalCount: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }].length }) };
     },
   });
   const doc = dom.window.document;
@@ -123,7 +123,7 @@ test('board.html: the detail panel\'s close button collapses it back to quick vi
     fetchImpl: async (url) => {
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
-      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+      return { ok: true, status: 200, json: async () => ({ reports: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }], page: 1, totalPages: 1, totalCount: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }].length }) };
     },
   });
   const doc = dom.window.document;
@@ -147,7 +147,7 @@ test('board.html: deleting a report requires confirmation — cancelling must no
       calls.push({ url: String(url), method: options.method || 'GET' });
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
-      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+      return { ok: true, status: 200, json: async () => ({ reports: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }], page: 1, totalPages: 1, totalCount: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }].length }) };
     },
   });
   const doc = dom.window.document;
@@ -176,7 +176,7 @@ test('board.html: confirming the delete dialog actually removes the report from 
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
       if (options.method === 'DELETE') return { ok: true, status: 200, json: async () => ({}) };
-      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+      return { ok: true, status: 200, json: async () => ({ reports: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }], page: 1, totalPages: 1, totalCount: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }].length }) };
     },
   });
   const doc = dom.window.document;
@@ -202,7 +202,7 @@ test('board.html: pressing Escape while the confirm modal is open cancels it', a
       calls.push({ url: String(url), method: options.method || 'GET' });
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
-      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+      return { ok: true, status: 200, json: async () => ({ reports: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }], page: 1, totalPages: 1, totalCount: [{ id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }].length }) };
     },
   });
   const doc = dom.window.document;
@@ -228,7 +228,7 @@ test('board.html: editing the title cancels cleanly on Escape — no PATCH sent,
       calls.push({ url: String(url), method: options.method || 'GET' });
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
-      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Original title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+      return { ok: true, status: 200, json: async () => ({ reports: [{ id: 'r1', title: 'Original title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }], page: 1, totalPages: 1, totalCount: [{ id: 'r1', title: 'Original title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }].length }) };
     },
   });
   const doc = dom.window.document;
@@ -258,7 +258,7 @@ test('board.html: editing the title actually updates it when Enter is pressed wi
       if (String(url).includes('/me')) return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
       if (options.method === 'PATCH') return { ok: true, status: 200, json: async () => ({ id: 'r1', title: 'Brand new title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString() }) };
-      return { ok: true, status: 200, json: async () => [{ id: 'r1', title: 'Original title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }] };
+      return { ok: true, status: 200, json: async () => ({ reports: [{ id: 'r1', title: 'Original title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }], page: 1, totalPages: 1, totalCount: [{ id: 'r1', title: 'Original title', priority: 'LOW', status: 'NEW', reporter: { discordUsername: 'u' }, device: 'PC', createdAt: new Date().toISOString(), evidenceLink: null, f9Link: null }].length }) };
     },
   });
   const doc = dom.window.document;

@@ -22,7 +22,7 @@ function baseFetch(reports) {
       return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true, canEditReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'A', iconUrl: null, backgroundStyle: null }) };
     }
     if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: reports.length }) };
-    return { ok: true, status: 200, json: async () => reports };
+    return { ok: true, status: 200, json: async () => ({ reports, page: 1, totalPages: 1, totalCount: reports.length }) };
   };
 }
 

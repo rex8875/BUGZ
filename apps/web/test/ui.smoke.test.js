@@ -71,13 +71,16 @@ test('board.html renders explicitly labeled, colored Priority and Status tags on
     fetchImpl: mockFetchSequence([
       { permissions: { canManageBugs: true, canManageSettings: true, canManageRoles: true, canPingTesters: true, canArchive: true, canEditReports: true, canDeleteReports: true, canShareDashboard: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'Alpha Testers', iconUrl: null, backgroundStyle: null },
       { total: 1, NEW: 1 },
-      [
-        {
-          id: 'r1', title: 'Floor breaks on level 3', priority: 'CRITICAL', status: 'NEW',
-          reporter: { discordUsername: 'tester1' }, device: 'PC', createdAt: new Date().toISOString(),
-          evidenceLink: 'https://example.com/clip.mp4', f9Link: 'https://example.com/f9.png',
-        },
-      ],
+      {
+        reports: [
+          {
+            id: 'r1', title: 'Floor breaks on level 3', priority: 'CRITICAL', status: 'NEW',
+            reporter: { discordUsername: 'tester1' }, device: 'PC', createdAt: new Date().toISOString(),
+            evidenceLink: 'https://example.com/clip.mp4', f9Link: 'https://example.com/f9.png',
+          },
+        ],
+        page: 1, totalPages: 1, totalCount: 1,
+      },
     ]),
   });
   const doc = dom.window.document;
@@ -130,7 +133,7 @@ test('board.html opens directly to a specific report when linked via ?report=<id
       // /reports (the general list) — deliberately empty, so this test
       // proves the deep link works even when the report isn't in the
       // currently-loaded filtered list (e.g. a different status).
-      return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, json: async () => ({ reports: [], page: 1, totalPages: 1, totalCount: 0 }) };
     },
   });
   const doc = dom.window.document;
@@ -151,7 +154,7 @@ test('the dashboard search bar parses tokens (before/on/after/by/device) and fre
         return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'Alpha', iconUrl: null, backgroundStyle: null }) };
       }
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 0 }) };
-      return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, json: async () => ({ reports: [], page: 1, totalPages: 1, totalCount: 0 }) };
     },
   });
   const doc = dom.window.document;
@@ -186,7 +189,7 @@ test('the search bar treats an unrecognized "word:value" token as free text rath
         return { ok: true, status: 200, json: async () => ({ permissions: { canManageBugs: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'Alpha', iconUrl: null, backgroundStyle: null }) };
       }
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 0 }) };
-      return { ok: true, status: 200, json: async () => [] };
+      return { ok: true, status: 200, json: async () => ({ reports: [], page: 1, totalPages: 1, totalCount: 0 }) };
     },
   });
   const doc = dom.window.document;
@@ -212,13 +215,16 @@ test('board.html never renders a javascript: (or other non-http) evidence link a
       if (String(url).includes('/summary')) return { ok: true, status: 200, json: async () => ({ total: 1 }) };
       return {
         ok: true, status: 200,
-        json: async () => [
-          {
-            id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW',
-            reporter: { discordUsername: 'tester1' }, device: 'PC', createdAt: new Date().toISOString(),
-            evidenceLink: 'javascript:alert(document.cookie)', f9Link: null,
-          },
-        ],
+        json: async () => ({
+          reports: [
+            {
+              id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW',
+              reporter: { discordUsername: 'tester1' }, device: 'PC', createdAt: new Date().toISOString(),
+              evidenceLink: 'javascript:alert(document.cookie)', f9Link: null,
+            },
+          ],
+          page: 1, totalPages: 1, totalCount: 1,
+        }),
       };
     },
   });
@@ -243,13 +249,16 @@ test('board.html shows the raw evidence/F9 URL as visible text, not a generic "V
     fetchImpl: mockFetchSequence([
       { permissions: { canManageBugs: true, canEditReports: true, canDeleteReports: true }, retestChannelId: null, testerPingRoleId: null, serverName: 'Alpha', iconUrl: null, backgroundStyle: null },
       { total: 1, NEW: 1 },
-      [
-        {
-          id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW',
-          reporter: { discordUsername: 'tester1' }, device: 'PC', createdAt: new Date().toISOString(),
-          evidenceLink: 'https://example.com/my-clip-evidence', f9Link: null,
-        },
-      ],
+      {
+        reports: [
+          {
+            id: 'r1', title: 'Bug', priority: 'LOW', status: 'NEW',
+            reporter: { discordUsername: 'tester1' }, device: 'PC', createdAt: new Date().toISOString(),
+            evidenceLink: 'https://example.com/my-clip-evidence', f9Link: null,
+          },
+        ],
+        page: 1, totalPages: 1, totalCount: 1,
+      },
     ]),
   });
   const doc = dom.window.document;
