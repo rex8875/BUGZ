@@ -600,18 +600,26 @@ function reconcileUpdatedReport(updated) {
 
   if (stillMatchesFilter) {
     state.reports = state.reports.map((r) => (r.id === updated.id ? updated : r));
-  } else {
-    state.reports = state.reports.filter((r) => r.id !== updated.id);
-    if (state.selectedId === updated.id) state.selectedId = null;
-    if (state.expandedId === updated.id) state.expandedId = null;
+    return false;
   }
+  state.reports = state.reports.filter((r) => r.id !== updated.id);
+  if (state.selectedId === updated.id) state.selectedId = null;
+  if (state.expandedId === updated.id) state.expandedId = null;
+  return true;
 }
 
 async function updateReport(id, data) {
   try {
     const updated = await api(`/api/servers/${serverId}/reports/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
-    reconcileUpdatedReport(updated);
-    renderList();
+    const removed = reconcileUpdatedReport(updated);
+    // A report leaving the current view can shift the total count and,
+    // if it was the last item on the last page, leave the page number
+    // stale or pointing at now-empty results — a full reload
+    // recalculates both from the server (which also clamps the page
+    // back into range) instead of trusting the now-approximate local
+    // state and a stale pagination bar.
+    if (removed) await loadReports();
+    else renderList();
     if (data.status) loadSummary();
   } catch (err) {
     showError(err.message);
@@ -623,8 +631,9 @@ const ACTION_TOAST = { ping: 'Testers pinged', retest: 'Posted to retest channel
 async function runAction(id, action) {
   try {
     const updated = await api(`/api/servers/${serverId}/reports/${id}/${action}`, { method: 'POST' });
-    reconcileUpdatedReport(updated);
-    renderList();
+    const removed = reconcileUpdatedReport(updated);
+    if (removed) await loadReports();
+    else renderList();
     if (action === 'archive' || action === 'unarchive') loadSummary();
     if (ACTION_TOAST[action]) showToast('success', ACTION_TOAST[action]);
   } catch (err) {

@@ -120,6 +120,32 @@ test('queryBugReports never crashes on malformed or malicious date tokens, and s
   }
 });
 
+test('queryBugReports never crashes on a malformed page value — falls back to page 1 instead of propagating NaN into the query', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const server = await setupServerWithReports(db, 5);
+
+  for (const badPage of [NaN, undefined, null, 'abc', {}]) {
+    const result = await db.queryBugReports(server.id, { page: badPage, pageSize: 5 });
+    assert.equal(result.page, 1, `page=${JSON.stringify(badPage)} should fall back to page 1`);
+    assert.equal(result.reports.length, 5);
+  }
+});
+
+test('queryBugReports clamps an out-of-range page instead of returning empty results or throwing', async () => {
+  const { db } = loadDbWithFakePrisma();
+  const server = await setupServerWithReports(db, 5);
+
+  const negative = await db.queryBugReports(server.id, { page: -3, pageSize: 5 });
+  assert.equal(negative.page, 1);
+
+  const zero = await db.queryBugReports(server.id, { page: 0, pageSize: 5 });
+  assert.equal(zero.page, 1);
+
+  const wayTooHigh = await db.queryBugReports(server.id, { page: 999, pageSize: 5 });
+  assert.equal(wayTooHigh.page, 1, 'only one page of results exists for 5 reports at pageSize 5 — should clamp to it, not return page 999 empty');
+  assert.equal(wayTooHigh.reports.length, 5);
+});
+
 test('getBugReportByNumber finds a report by its per-server sequential number', async () => {
   const { db } = loadDbWithFakePrisma();
   const server = await setupServerWithReports(db, 3);

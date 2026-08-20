@@ -854,7 +854,7 @@ async function queryBugReports(serverId, options = {}) {
 
   const totalCount = await prisma.bugReport.count({ where });
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  const safePage = Math.min(Math.max(1, page), totalPages);
+  const safePage = Number.isFinite(page) ? Math.min(Math.max(1, page), totalPages) : 1;
 
   const reports = await prisma.bugReport.findMany({
     where,
